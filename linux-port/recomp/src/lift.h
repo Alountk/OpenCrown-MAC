@@ -18,7 +18,8 @@ struct LiftResult {
 // `functions` holds the start addresses of every recompiled function: direct calls to them become direct C++ calls.
 // `module` names the module the function belongs to ("" = the only one): its symbols are f_<module>_<hex> and it addresses its
 // image through dcp_img_<module>, so several modules can share one program.
-LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module = "");
+// `comments` keeps the "// 0x...: mov eax, 5" line before every instruction (readable, about 40% larger).
+LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module = "", bool comments = true);
 
 // Includes and helper macros every generated translation unit starts with.
 std::string lift_prelude();

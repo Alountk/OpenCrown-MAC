@@ -300,6 +300,20 @@ if(DCP_RECOMP)
     DCP_TEST_RT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/recomp/runtime"
     DCP_TEST_ARCH="${DCP_E2E_ARCH}")
   add_test(NAME dispatch_e2e COMMAND test_dispatch_e2e)
+  # Reads a decrypted PS4 module and finds its functions (shared by dcp_scan and dcp_recompile).
+  add_library(dcp_recomp_module STATIC recomp/tools/module.cpp recomp/tools/emit.cpp)
+  target_include_directories(dcp_recomp_module PUBLIC recomp/tools)
+  target_link_libraries(dcp_recomp_module PUBLIC dcp_recomp dcp_loader)
+  add_executable(test_module recomp/tests/test_module.cpp)
+  target_link_libraries(test_module PRIVATE dcp_recomp_module ${CMAKE_DL_LIBS})
+  target_include_directories(test_module PRIVATE recomp/runtime)
+  target_compile_definitions(test_module PRIVATE
+    DCP_TEST_CXX="${CMAKE_CXX_COMPILER}"
+    DCP_TEST_RT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/recomp/runtime"
+    DCP_TEST_ARCH="${DCP_E2E_ARCH}")
+  add_test(NAME module COMMAND test_module)
+  add_executable(dcp_recompile recomp/tools/dcp_recompile.cpp)
+  target_link_libraries(dcp_recompile PRIVATE dcp_recomp_module)
   add_executable(dcp_scan recomp/tools/dcp_scan.cpp)
-  target_link_libraries(dcp_scan PRIVATE dcp_recomp dcp_loader)
+  target_link_libraries(dcp_scan PRIVATE dcp_recomp_module)
 endif()

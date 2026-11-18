@@ -40,13 +40,14 @@ struct Lifter {
     const Function& fn;
     const std::set<uint64_t>& functions;
     std::string module;
+    bool comments = true;
     std::string img;  // the C++ name of this module's image base
     LiftResult res;
     std::string body;
     bool unsupported_here = false;
 
-    Lifter(const Function& f, const std::set<uint64_t>& fs, const std::string& m)
-        : fn(f), functions(fs), module(m), img(m.empty() ? "dcp_img" : "dcp_img_" + m) {}
+    Lifter(const Function& f, const std::set<uint64_t>& fs, const std::string& m, bool c)
+        : fn(f), functions(fs), module(m), comments(c), img(m.empty() ? "dcp_img" : "dcp_img_" + m) {}
     std::string fname(uint64_t a) const { return function_name(a, module); }
 
     void emit(const std::string& s) { body += "  " + s + "\n"; }
@@ -429,7 +430,7 @@ struct Lifter {
     void insn(const Insn& in) {
         const std::string& mn = in.mnemonic;
         ++res.insns;
-        body += fmt("  // 0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+        if (comments) body += fmt("  // 0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
 
         if (in.flow == Flow::Ret) {
             long long extra = in.nops && in.ops[0].kind == OpKind::Imm ? (long long)in.ops[0].imm : 0;
@@ -625,8 +626,8 @@ using namespace dcp::rt;
 )";
 }
 
-LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module) {
-    Lifter l(fn, functions, module);
+LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module, bool comments) {
+    Lifter l(fn, functions, module, comments);
     return l.run();
 }
 
