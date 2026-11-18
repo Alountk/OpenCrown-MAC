@@ -1,0 +1,183 @@
+// Loading a module for recompilation: image layout and function boundaries, on a synthetic ELF. No game data.
+#include <dlfcn.h>
+#include <unistd.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <string>
+#include <cstring>
+#include <initializer_list>
+#include <stdexcept>
+#include <vector>
+
+#include <sys/stat.h>
+
+#include "dcp_rt.h"
+
+#include "emit.h"
+#include "module.h"
+
+using namespace dcp::recomp;
+
+static int g_fail = 0;
+#define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++g_fail; } } while (0)
+
+template <class T> static void put(std::vector<uint8_t>& d, size_t off, T v) {
+    if (d.size() < off + sizeof(T)) d.resize(off + sizeof(T));
+    std::memcpy(d.data() + off, &v, sizeof(T));
+}
+
+// An ELF with one PT_LOAD over the whole file (vaddr 0) and a PT_GNU_EH_FRAME. Code at 0x100: two functions, 0x20 and 0x10 bytes.
+static std::vector<uint8_t> synthetic_elf(bool with_eh_frame_header) {
+    std::vector<uint8_t> d(0x1000, 0);
+    std::memcpy(d.data(), "\x7f" "ELF", 4);
+    put<uint16_t>(d, 0x10, 0xFE10);
+    put<uint64_t>(d, 0x18, 0x100);  // entry
+    put<uint64_t>(d, 0x20, 0x40);   // phoff
+    put<uint16_t>(d, 0x36, 56);
+    put<uint16_t>(d, 0x38, 2);
+    auto ph = [&](int i, uint32_t type, uint32_t flags, uint64_t off, uint64_t va, uint64_t fs, uint64_t ms) {
+        const size_t p = 0x40 + size_t(i) * 56;
+        put(d, p, type), put(d, p + 4, flags), put(d, p + 8, off), put(d, p + 16, va), put(d, p + 32, fs), put(d, p + 40, ms);
+    };
+    ph(0, 1, 5, 0, 0, 0x1000, 0x1000);
+    ph(1, with_eh_frame_header ? 0x6474e550u : 0x6474e551u, 4, 0x800, 0x800, 0x10, 0x10);  // the second is PT_GNU_STACK: no eh_frame
+    const uint8_t f1[] = {0xb8, 0x05, 0x00, 0x00, 0x00, 0xc3};  // function 1: mov eax, 5; ret
+    std::memcpy(d.data() + 0x100, f1, sizeof f1);
+    d[0x120] = 0xc3;                                            // function 2: ret
+    // .eh_frame_hdr at 0x800: version 1, eh_frame_ptr pcrel sdata4 -> .eh_frame at 0x900
+    d[0x800] = 1, d[0x801] = 0x1b, d[0x802] = 0x03, d[0x803] = 0x3b;
+    put<int32_t>(d, 0x804, int32_t(0x900 - 0x804));
+    // .eh_frame at 0x900: a CIE and two FDEs (pc_begin pcrel sdata4), then the terminator
+    size_t at = 0x900;
+    auto u32 = [&](uint32_t v) { put(d, at, v), at += 4; };
+    const uint8_t cie[] = {0, 0, 0, 0, 1, 'z', 'R', 0, 1, 0x78, 16, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0};
+    u32(uint32_t(sizeof cie));
+    std::memcpy(d.data() + at, cie, sizeof cie), at += sizeof cie;
+    auto fde = [&](uint32_t begin, uint32_t range) {
+        const size_t start = at;
+        u32(0x14);
+        u32(uint32_t(start + 4 - 0x900));  // back to the CIE at 0x900
+        put<int32_t>(d, at, int32_t(begin - (at))), at += 4;
+        u32(range);
+        d[at++] = 0;
+        while ((at - start) % 4) ++at;
+        put<uint32_t>(d, start, uint32_t(at - start - 4));
+    };
+    fde(0x100, 0x20);
+    fde(0x120, 0x10);
+    u32(0);
+    return d;
+}
+
+static void test_layout_and_functions() {
+    LoadedModule m = load_module_bytes(synthetic_elf(true));
+    CHECK(m.image.size() >= 0x1000 && m.image[0x100] == 0xb8 && m.image[0x120] == 0xc3);
+    CHECK(m.entry == 0x100);
+    CHECK(m.functions.size() == 2);
+    if (m.functions.size() == 2) {
+        CHECK(m.functions[0].start == 0x100 && m.functions[0].size == 0x20);
+        CHECK(m.functions[1].start == 0x120 && m.functions[1].size == 0x10);
+    }
+}
+
+static void test_errors_are_readable() {
+    bool threw = false;
+    try { load_module_bytes(synthetic_elf(false)); } catch (const std::runtime_error& e) { threw = std::strstr(e.what(), "eh_frame") != nullptr; }
+    CHECK(threw);  // a module without .eh_frame cannot be split into functions: say so
+    threw = false;
+    try { load_module_bytes({1, 2, 3}); } catch (const std::exception&) { threw = true; }
+    CHECK(threw);
+    threw = false;
+    try { load_module("/nonexistent/path/eboot.bin"); } catch (const std::runtime_error& e) { threw = std::strstr(e.what(), "cannot read") != nullptr; }
+    CHECK(threw);
+}
+
+static std::string read_file(const std::string& p) {
+    std::ifstream f(p);
+    return std::string((std::istreambuf_iterator<char>(f)), {});
+}
+
+static void test_emit_and_run() {
+    const char* t = getenv("TMPDIR");
+    std::string dt = std::string(t ? t : "/tmp") + "/dcp_emit_XXXXXX";
+    std::vector<char> dv(dt.begin(), dt.end());
+    dv.push_back(0);
+    if (!mkdtemp(dv.data())) return (void)std::puts("emit: skipped (no temp dir)");
+    const std::string dir = dv.data();
+    LoadedModule m = load_module_bytes(synthetic_elf(true));
+
+    EmitOptions o;
+    o.module = "m";
+    o.out_dir = dir;
+    o.shards = 2;
+    EmitStats st = emit_module(m, o);
+    CHECK(st.functions == 2 && st.unsupported == 0 && st.files == 3);  // two shards and the table
+    CHECK(access((dir + "/m_000.cpp").c_str(), R_OK) == 0 && access((dir + "/m_001.cpp").c_str(), R_OK) == 0 &&
+          access((dir + "/m_table.cpp").c_str(), R_OK) == 0);
+    const std::string all = read_file(dir + "/m_000.cpp") + read_file(dir + "/m_001.cpp") + read_file(dir + "/m_table.cpp");
+    CHECK(all.find("// 0x") == std::string::npos);                          // comments are off by default
+    CHECK(all.find("f_m_100") != std::string::npos && all.find("f_m_120") != std::string::npos && all.find("dcp_register_m") != std::string::npos);
+    CHECK(all.find("Derived from the user's own game files") != std::string::npos);  // every file carries the do-not-distribute notice
+
+    o.comments = true;
+    o.out_dir = dir + "/c";
+    mkdir(o.out_dir.c_str(), 0700);
+    emit_module(m, o);
+    CHECK(read_file(o.out_dir + "/m_000.cpp").find("// 0x100: mov eax, 0x05") != std::string::npos);
+
+    // The shards build and run: compile them with the dispatch runtime, register, call function 1.
+    const std::string cmd = std::string(DCP_TEST_CXX) + " " + DCP_TEST_ARCH + " -std=c++20 -O1 -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
+                            "/m.so " + dir + "/m_000.cpp " + dir + "/m_001.cpp " + dir + "/m_table.cpp " DCP_TEST_RT_DIR "/dcp_dispatch.cpp > " + dir + "/cc.log 2>&1";
+    if (std::system(cmd.c_str())) {
+        std::fprintf(stderr, "emit: compiling the shards failed:\n");
+        std::system(("head -c 3000 " + dir + "/cc.log >&2").c_str());
+        ++g_fail;
+    } else if (void* lib = dlopen((dir + "/m.so").c_str(), RTLD_NOW)) {
+        auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register_m"));
+        auto fn = reinterpret_cast<void (*)(dcp::rt::Ctx*)>(dlsym(lib, "f_m_100"));
+        CHECK(reg && fn);
+        if (reg && fn) {
+            reg(reinterpret_cast<unsigned long long>(m.image.data()), m.image.size());
+            alignas(16) static uint8_t stack[128];
+            dcp::rt::Ctx c{};
+            c.r[dcp::rt::RSP] = reinterpret_cast<uint64_t>(stack) + sizeof stack - 8;
+            fn(&c);
+            CHECK(uint32_t(c.r[dcp::rt::RAX]) == 5);
+        }
+    } else {
+        std::fprintf(stderr, "emit: dlopen: %s\n", dlerror());
+        ++g_fail;
+    }
+    std::system(("rm -rf '" + dir + "'").c_str());
+}
+
+static void test_repo_guard() {
+    // Generated sources must not end up in a git work tree (they are derived from the user's game files).
+    const char* t = getenv("TMPDIR");
+    std::string dt = std::string(t ? t : "/tmp") + "/dcp_guard_XXXXXX";
+    std::vector<char> dv(dt.begin(), dt.end());
+    dv.push_back(0);
+    if (!mkdtemp(dv.data())) return (void)std::puts("guard: skipped (no temp dir)");
+    const std::string dir = dv.data();
+    mkdir((dir + "/repo").c_str(), 0700);
+    mkdir((dir + "/repo/.git").c_str(), 0700);
+    mkdir((dir + "/repo/out").c_str(), 0700);
+    mkdir((dir + "/plain").c_str(), 0700);
+    CHECK(inside_git_work_tree(dir + "/repo/out"));
+    CHECK(inside_git_work_tree(dir + "/repo"));
+    CHECK(!inside_git_work_tree(dir + "/plain"));
+    std::system(("rm -rf '" + dir + "'").c_str());
+}
+
+int main() {
+    test_layout_and_functions();
+    test_errors_are_readable();
+    test_emit_and_run();
+    test_repo_guard();
+    if (g_fail) return std::fprintf(stderr, "module: %d check(s) failed\n", g_fail), 1;
+    std::puts("module: all tests passed");
+    return 0;
+}

@@ -12,38 +12,21 @@
 #include "cfg.h"
 #include "lift.h"
 #include "loader/elf.h"
+#include "module.h"
 
 using namespace dcp;
 
-static uint64_t rd(const uint8_t* p, int n) { uint64_t v = 0; std::memcpy(&v, p, size_t(n)); return v; }
 
 int main(int argc, char** argv) {
-    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module>\n"), 2;
-    std::ifstream f(argv[1], std::ios::binary);
-    std::vector<uint8_t> file((std::istreambuf_iterator<char>(f)), {});
-    std::vector<uint8_t> elf;
-    loader::ElfInfo info;
-    try { elf = loader::unwrap_self(file); info = loader::parse_elf(elf); }
+    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect | --show-jmp N | --lift out.cpp]\n"), 2;
+    recomp::LoadedModule mod;
+    try { mod = recomp::load_module(argv[1]); }
     catch (const std::exception& e) { return std::fprintf(stderr, "scan: %s\n", e.what()), 1; }
-
-    std::vector<uint8_t> img(info.image_size, 0);  // image laid out at base 0, like map_image
-    for (const auto& s : info.load)
-        if (s.offset + s.filesz <= elf.size() && s.vaddr + s.filesz <= img.size())
-            std::memcpy(img.data() + s.vaddr, elf.data() + s.offset, s.filesz);
-
-    // PT_GNU_EH_FRAME (0x6474e550) -> .eh_frame_hdr -> .eh_frame
-    const uint64_t phoff = rd(elf.data() + 0x20, 8);
-    const unsigned phentsize = unsigned(rd(elf.data() + 0x36, 2)), phnum = unsigned(rd(elf.data() + 0x38, 2));
-    uint64_t hdr = 0;
-    for (unsigned i = 0; i < phnum; ++i) {
-        const uint8_t* ph = elf.data() + phoff + uint64_t(i) * phentsize;
-        if (rd(ph, 4) == 0x6474e550) hdr = rd(ph + 16, 8);
-    }
-    if (!hdr || hdr + 8 > img.size()) return std::fprintf(stderr, "scan: no PT_GNU_EH_FRAME\n"), 1;
-    const int32_t rel = int32_t(rd(img.data() + hdr + 4, 4));  // eh_frame_ptr, pcrel sdata4 (checked below)
-    if (img[hdr + 1] != 0x1b) return std::fprintf(stderr, "scan: unexpected eh_frame_ptr encoding 0x%x\n", img[hdr + 1]), 1;
-    const uint64_t eh = hdr + 4 + uint64_t(int64_t(rel));
-    auto ranges = recomp::parse_eh_frame(img.data() + eh, img.size() - eh, eh);
+    const std::vector<uint8_t>& img = mod.image;
+    const uint64_t eh = mod.eh_frame;
+    auto& ranges = mod.functions;
+    loader::ElfInfo info;
+    info.image_size = img.size();
 
     size_t blocks = 0, insns = 0, bad = 0, indirect = 0, tails = 0;
     std::set<uint64_t> starts, call_targets;
