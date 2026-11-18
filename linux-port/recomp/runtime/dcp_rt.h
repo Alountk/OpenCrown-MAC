@@ -21,10 +21,18 @@ using u128 = unsigned __int128;
 using i128 = __int128;
 
 // Guest register file at function boundaries. r[] is in x86 encoding order: rax rcx rdx rbx rsp rbp rsi rdi r8..r15.
+// A 256-bit vector register: ymm n, whose low half is xmm n.
+struct Vec {
+    u64 q[4];
+};
+
 struct Ctx {
     u64 r[16];
     u64 rflags;  // only meaningful when built with DCP_TEST_FLAGS (the differential tests)
+    u64 pad_[3];
+    Vec x[16];   // ymm0..15
 };
+static_assert(__builtin_offsetof(Ctx, x) == 160, "the differential test's assembly trampoline hard-codes this layout");
 
 enum Reg { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 };
 
@@ -325,5 +333,40 @@ template <class T> inline T bswap(T v) {
     else if constexpr (sizeof(T) == 4) return T(__builtin_bswap32(v));
     else return T(__builtin_bswap16(v));  // movbe r16
 }
+
+// ---- vector registers -------------------------------------------------------------------------------------------
+// VEX-encoded instructions with a 128-bit destination clear bits 255:128 of the register; 256-bit ones write all of it.
+
+inline Vec vzero() { return Vec{{0, 0, 0, 0}}; }
+// Keeps the low B bits of v and clears the rest.
+template <int B> inline Vec vcut(Vec v) {
+    if constexpr (B <= 128) v.q[2] = v.q[3] = 0;
+    return v;
+}
+template <int B> inline Vec vld(u64 a) {
+    Vec v = vzero();
+    std::memcpy(v.q, reinterpret_cast<const void*>(a), B / 8);
+    return v;
+}
+template <int B> inline void vst(u64 a, const Vec& v) { std::memcpy(reinterpret_cast<void*>(a), v.q, B / 8); }
+
+// Lowest scalar element of a register (u32 or u64), and a register holding only that element.
+template <class T> inline T vlo(const Vec& v) { return T(v.q[0]); }
+template <class T> inline Vec vscalar(T e) {
+    Vec v = vzero();
+    v.q[0] = e;
+    return v;
+}
+// `base` with its lowest element replaced (vmovss / vmovsd register form).
+template <class T> inline Vec vins(Vec base, T e) {
+    if constexpr (sizeof(T) == 8) base.q[0] = e;
+    else base.q[0] = (base.q[0] & ~u64(0xffffffff)) | u64(e);
+    return base;
+}
+
+inline Vec vxor(const Vec& a, const Vec& b) { return Vec{{a.q[0] ^ b.q[0], a.q[1] ^ b.q[1], a.q[2] ^ b.q[2], a.q[3] ^ b.q[3]}}; }
+inline Vec vand(const Vec& a, const Vec& b) { return Vec{{a.q[0] & b.q[0], a.q[1] & b.q[1], a.q[2] & b.q[2], a.q[3] & b.q[3]}}; }
+inline Vec vor(const Vec& a, const Vec& b) { return Vec{{a.q[0] | b.q[0], a.q[1] | b.q[1], a.q[2] | b.q[2], a.q[3] | b.q[3]}}; }
+inline Vec vandn(const Vec& a, const Vec& b) { return Vec{{~a.q[0] & b.q[0], ~a.q[1] & b.q[1], ~a.q[2] & b.q[2], ~a.q[3] & b.q[3]}}; }
 
 }  // namespace dcp::rt
