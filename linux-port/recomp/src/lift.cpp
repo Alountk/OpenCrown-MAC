@@ -150,6 +150,75 @@ struct Lifter {
     }
     void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
 
+    // Atomic and exchange-like instructions: lock-prefixed read-modify-write on memory, xchg with memory (implicitly locked),
+    // xadd, cmpxchg, cmpxchg16b, and bts / btr / btc. Returns false when `in` is none of them (or has nothing atomic about it).
+    bool atomic_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& d = in.ops[0];
+        const Operand& s = in.ops[1];
+        const int N = d.bits;
+        const char* T = ut(N);
+        const bool mem = d.kind == OpKind::Mem;
+
+        if (mn == "cmpxchg16b" && mem) {
+            emit(fmt("{ u64 e[2] = {r[RAX], r[RDX]}, w[2] = {r[RBX], r[RCX]}; fl.zf = atomic_cas128(%s, e, w);"
+                     " if (!fl.zf) { r[RAX] = e[0]; r[RDX] = e[1]; } }", addr(d).c_str()));
+            return true;
+        }
+        if (mn == "xchg" && (mem || s.kind == OpKind::Mem)) {  // either operand in memory: always locked
+            const Operand& m = mem ? d : s;
+            const Operand& r = mem ? s : d;
+            emit(fmt("{ %s v = %s; %s o = atomic_rmw<%s>(%s, [&](%s) -> %s { return v; }); %s }", T, read(r, N).c_str(), T, T,
+                     addr(m).c_str(), T, T, write(r, "o").c_str()));
+            return true;
+        }
+        if (mn == "xadd") {
+            if (mem) {
+                emit(fmt("{ %s v = %s; %s o = atomic_rmw<%s>(%s, [&](%s x) -> %s { return add<%s>(x, v, fl); }); %s }", T,
+                         read(s, N).c_str(), T, T, addr(d).c_str(), T, T, T, write(s, "o").c_str()));
+            } else {
+                emit(fmt("{ %s a = %s, b = %s; %s t = add<%s>(a, b, fl); %s %s }", T, read(d).c_str(), read(s, N).c_str(), T, T,
+                         write(s, "a").c_str(), write(d, "t").c_str()));
+            }
+            return true;
+        }
+        if (mn == "cmpxchg") {
+            if (mem) {
+                emit(fmt("{ %s e = rd<%s>(r[RAX]), v = %s, e0 = e; bool ok = atomic_cas<%s>(%s, e, v); (void)sub<%s>(e0, e, fl);"
+                         " if (!ok) wr<%s>(r[RAX], e); }", T, T, read(s, N).c_str(), T, addr(d).c_str(), T, T));
+            } else {
+                emit(fmt("{ %s acc = rd<%s>(r[RAX]), dv = %s; (void)sub<%s>(acc, dv, fl); if (fl.zf) { %s } else wr<%s>(r[RAX], dv); }", T, T,
+                         read(d).c_str(), T, write(d, read(s, N)).c_str(), T));
+            }
+            return true;
+        }
+        if (mn == "bts" || mn == "btr" || mn == "btc") {
+            if (mem && s.kind != OpKind::Imm) return false;  // bit-string addressing through a register: unsupported
+            const std::string f = mn == "bts" ? "bit_set" : mn == "btr" ? "bit_reset" : "bit_flip";
+            if (mem && in.lock) {
+                emit(fmt("atomic_rmw<%s>(%s, [&](%s o) -> %s { return %s<%s>(o, %s, fl); });", T, addr(d).c_str(), T, T, f.c_str(), T,
+                         read(s, 8).c_str()));
+            } else {
+                emit(write(d, fmt("%s<%s>(%s, %s, fl)", f.c_str(), T, read(d).c_str(), read(s, 8).c_str())));
+            }
+            return true;
+        }
+        if (!(in.lock && mem)) return false;
+        // lock-prefixed ALU on memory
+        std::string body;
+        const std::string S = in.nops > 1 ? read(s, N, true) : "";
+        if (mn == "add" || mn == "adc" || mn == "sub" || mn == "sbb") body = fmt("%s<%s>(o, v, fl)", mn.c_str(), T);
+        else if (mn == "and") body = fmt("logic<%s>((%s)(o & v), fl)", T, T);
+        else if (mn == "or") body = fmt("logic<%s>((%s)(o | v), fl)", T, T);
+        else if (mn == "xor") body = fmt("logic<%s>((%s)(o ^ v), fl)", T, T);
+        else if (mn == "inc" || mn == "dec" || mn == "neg") body = fmt("%s<%s>(o, fl)", mn.c_str(), T);
+        else if (mn == "not") body = fmt("(%s)~o", T);
+        else return false;
+        emit(fmt("{ %s v = %s; (void)v; atomic_rmw<%s>(%s, [&](%s o) -> %s { return %s; }); }", T, S.empty() ? "0" : S.c_str(), T,
+                 addr(d).c_str(), T, T, body.c_str()));
+        return true;
+    }
+
     // 128-bit integer SIMD families. Returns false when `in` is none of them.
     bool int_simd_insn(const Insn& in) {
         const std::string& mn = in.mnemonic;
@@ -480,6 +549,7 @@ struct Lifter {
             emit("{ u64 v = ld<u64>(r[RSP]); r[RSP] += 8; " + write(d, "v") + " }");
             return;
         }
+        if (atomic_insn(in)) return;
         if (mn == "xchg") {
             emit(fmt("{ %s a = %s, b = %s; %s %s }", ut(N), read(d).c_str(), read(s, N).c_str(), write(d, "b").c_str(),
                      write(s, "a").c_str()));
