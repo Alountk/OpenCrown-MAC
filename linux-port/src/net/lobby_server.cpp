@@ -1,6 +1,7 @@
 // Mock lobby server (lobby_server.h). Single-threaded select() loop; all state in memory. Message formats are
 // specified in notes/map/lobby_protocol.md (keep the two in sync).
 #define FD_SETSIZE 256
+#include "platform/compat.h"
 #include "net/lobby_server.h"
 
 #include <arpa/inet.h>

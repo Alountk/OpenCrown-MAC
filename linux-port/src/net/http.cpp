@@ -1,4 +1,5 @@
 // HTTP/1.1 GET client (http.h) on BSD sockets + net/tls.
+#include "platform/compat.h"
 #include "net/http.h"
 
 #include "net/tls.h"

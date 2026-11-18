@@ -1,4 +1,5 @@
 // Support for older CPUs without MOVBE / BMI1 / LZCNT. Details are restricted (see the README).
+#include "platform/compat.h"
 #include "loader/cpu_compat.h"
 
 #include <cpuid.h>

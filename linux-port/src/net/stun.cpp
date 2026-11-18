@@ -1,4 +1,5 @@
 // Minimal STUN client (stun.h).
+#include "platform/compat.h"
 #include "net/stun.h"
 
 #include <arpa/inet.h>
@@ -143,7 +144,7 @@ bool query_one(int s, uint32_t sip, uint16_t sport, unsigned timeout_ms, uint32_
         FD_SET(s, &rs);
         uint64_t wait = std::min<uint64_t>(next, start + timeout_ms) - now_ms();
         if (int64_t(wait) < 1) wait = 1;
-        timeval tv{long(wait / 1000), long((wait % 1000) * 1000)};
+        timeval tv{time_t(wait / 1000), suseconds_t((wait % 1000) * 1000)};
         if (select(s + 1, &rs, nullptr, nullptr, &tv) <= 0) continue;
         uint8_t buf[1500];
         sockaddr_in from{};

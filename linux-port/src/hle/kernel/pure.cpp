@@ -1,3 +1,4 @@
+#include "platform/compat.h"
 #include "pure.h"
 
 #include <algorithm>

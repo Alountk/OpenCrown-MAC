@@ -8,8 +8,8 @@ endif()
 
 # Linux / Steam Deck build. Separate from the Windows tree (../port): own sources, own build, no shared files.
 # Targets are added here as each part of src/ is ported (see README.md, Phase 1).
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "linux-port builds on Linux only (WSL2 works); the Windows build is ../port")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
+  message(FATAL_ERROR "linux-port builds on Linux or macOS only (WSL2 works); the Windows build is ../port")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,6 +18,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 add_compile_options(-Wall -Wextra)
+if(APPLE)
+  # ucontext.h needs _XOPEN_SOURCE on macOS; _DARWIN_C_SOURCE keeps the BSD/Mach extras visible.
+  add_compile_definitions(_XOPEN_SOURCE=700 _DARWIN_C_SOURCE)
+endif()
 # Release files must not carry this PC's paths (mbedTLS and assert() put __FILE__ into the binary): the source tree,
 # the build dir and every FETCHCONTENT_SOURCE_DIR_* override are mapped to neutral names.
 set(DCP_PREFIX_MAPS "${CMAKE_CURRENT_SOURCE_DIR}=." "${CMAKE_BINARY_DIR}=build")

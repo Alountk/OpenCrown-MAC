@@ -1,4 +1,5 @@
 // Online identity (identity.h). Paths are UTF-8 strings like the rest of the user-dir code (getenv, ifstream).
+#include "platform/compat.h"
 #include "net/identity.h"
 
 #include <mbedtls/platform_util.h>

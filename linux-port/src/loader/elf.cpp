@@ -1,3 +1,4 @@
+#include "platform/compat.h"
 #include "elf.h"
 
 #include <cstring>

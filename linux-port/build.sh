@@ -11,8 +11,11 @@ set -e
 cd "$(dirname "$0")"
 # Ubuntu 22.04 defaults to g++ 11; prefer 12 when installed (better C++20).
 if [ -z "$CXX" ] && command -v g++-12 >/dev/null 2>&1; then export CC=gcc-12 CXX=g++-12; fi
+# macOS: the PS4's x86-64 code runs directly, so build x86_64 (Rosetta 2 on Apple Silicon). Needs cmake and ninja (brew).
+mac=""
+if [ "$(uname -s)" = "Darwin" ]; then mac="-DCMAKE_OSX_ARCHITECTURES=x86_64"; fi
 gen=""
 command -v ninja >/dev/null 2>&1 && gen="-G Ninja"
-cmake -S . -B build $gen -DCMAKE_BUILD_TYPE=Release -DDCP_RENDER="${DCP_RENDER:-ON}"
-cmake --build build -j"$(nproc)"
+cmake -S . -B build $gen -DCMAKE_BUILD_TYPE=Release -DDCP_RENDER="${DCP_RENDER:-ON}" $mac
+cmake --build build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 ctest --test-dir build --output-on-failure

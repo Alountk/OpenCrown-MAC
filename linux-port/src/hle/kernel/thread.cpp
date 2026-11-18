@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <sys/mman.h>
 
+#include "platform/compat.h"
 #include "../common.h"
 
 namespace dcp::hle {
@@ -74,7 +75,11 @@ void* thread_main(void* p) {
 // Absolute CLOCK_MONOTONIC deadline `usec` from now (the clock every condvar below is created with).
 timespec deadline_after_us(uint64_t usec) {
     timespec ts;
+#ifdef __APPLE__
+    clock_gettime(CLOCK_REALTIME, &ts);  // macOS condvars wait on the realtime clock (no pthread_condattr_setclock)
+#else
     clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
     ts.tv_sec += time_t(usec / 1000000);
     ts.tv_nsec += long(usec % 1000000) * 1000;
     if (ts.tv_nsec >= 1000000000) ts.tv_sec += 1, ts.tv_nsec -= 1000000000;
@@ -83,7 +88,9 @@ timespec deadline_after_us(uint64_t usec) {
 void init_mono_cond(pthread_cond_t* cv) {
     pthread_condattr_t ca;
     pthread_condattr_init(&ca);
+#ifndef __APPLE__
     pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+#endif
     pthread_cond_init(cv, &ca);
     pthread_condattr_destroy(&ca);
 }

@@ -1,6 +1,7 @@
 // UdpCarrier implementation; format and rules in udp_carrier.h. One I/O thread per carrier receives, retransmits and
 // sends keepalives; send() transmits immediately from the caller's thread when the window allows. Sink events are
 // collected under the lock and dispatched after it is released.
+#include "platform/compat.h"
 #include "net/udp_carrier.h"
 
 #include "net/stun.h"
