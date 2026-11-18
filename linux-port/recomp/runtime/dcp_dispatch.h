@@ -15,6 +15,10 @@ struct FnEntry {
     Fn fn;
 };
 
+// Every module (the eboot and each PRX library) has its own image and function table. set_image / set_function_table describe
+// the first one; add_module registers further ones. `sorted` must outlive all calls.
+void add_module(u64 base, u64 size, const FnEntry* sorted, size_t count);
+
 // Where the image is mapped (guest pointer == host pointer, so a guest address is base + virtual address).
 void set_image(u64 base, u64 size);
 // Table of every recompiled function, sorted by `off` with no duplicates. Must outlive all calls.

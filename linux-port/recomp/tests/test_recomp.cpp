@@ -121,6 +121,14 @@ static void test_declarations() {
     CHECK(d.find("extern \"C\" void f_1000(Ctx*);\n") != std::string::npos);
     CHECK(d.find("extern \"C\" void f_20f0(Ctx*);\n") != std::string::npos);
     CHECK(lift_declarations({}).empty());
+    // Several modules (eboot, libc.prx, ...) share offsets, so their symbols carry the module name.
+    CHECK(function_name(0x1000, "libc") == "f_libc_1000" && function_name(0x1000) == "f_1000");
+    const std::string dm = lift_declarations({0x1000}, "libc");
+    CHECK(dm.find("extern \"C\" void f_libc_1000(Ctx*);") != std::string::npos);
+    CHECK(dm.find("extern dcp::rt::u64 dcp_img_libc;") != std::string::npos);
+    const std::string tm = lift_function_table({0x1000}, "libc");
+    CHECK(tm.find("{0x1000u, f_libc_1000}") != std::string::npos && tm.find("dcp_register_libc(") != std::string::npos);
+    CHECK(tm.find("dcp_img_libc = img_base") != std::string::npos && tm.find("add_module(") != std::string::npos);
     // The function table is sorted (std::set), registers itself, and survives an empty program.
     const std::string t = lift_function_table({0x20f0, 0x1000});
     CHECK(t.find("{0x1000u, f_1000},\n  {0x20f0u, f_20f0}") != std::string::npos);

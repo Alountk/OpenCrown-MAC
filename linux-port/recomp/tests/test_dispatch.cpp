@@ -87,6 +87,26 @@ static void test_host_functions() {
     CHECK(g_foreign_calls == before + 1);
 }
 
+alignas(16) static unsigned char g_image2[0x1000];
+
+static void test_modules() {
+    // Several modules (the eboot and its PRX libraries) each have their own base and table; offsets overlap between them.
+    const FnEntry t1[] = {{0x10, fn_a}, {0x40, fn_b}};
+    const FnEntry t2[] = {{0x10, fn_c}, {0x80, fn_a}};
+    set_image(reinterpret_cast<u64>(g_image), sizeof g_image);
+    set_function_table(t1, 2);
+    add_module(reinterpret_cast<u64>(g_image2), sizeof g_image2, t2, 2);
+    set_foreign_handler(foreign);
+    const u64 b1 = reinterpret_cast<u64>(g_image), b2 = reinterpret_cast<u64>(g_image2);
+    CHECK(find_function(b1 + 0x10) == fn_a && find_function(b2 + 0x10) == fn_c);  // same offset, different modules
+    CHECK(find_function(b1 + 0x40) == fn_b && find_function(b2 + 0x40) == nullptr);
+    CHECK(find_function(b2 + 0x80) == fn_a && find_function(b1 + 0x80) == nullptr);
+    CHECK(find_function(b2 + sizeof g_image2) == nullptr && find_function(b2 - 1) == nullptr);
+    Ctx c{};
+    call_ind(&c, b2 + 0x10);
+    CHECK(c.r[RAX] == 100);
+}
+
 static void test_large_table() {
     // The binary search must find every entry and reject every neighbour, whatever the spacing.
     std::vector<FnEntry> table;
@@ -103,6 +123,7 @@ static void test_large_table() {
 
 int main() {
     test_lookup_and_dispatch();
+    test_modules();
     test_large_table();
     test_host_functions();
     if (g_fail) return std::fprintf(stderr, "dispatch: %d check(s) failed\n", g_fail), 1;

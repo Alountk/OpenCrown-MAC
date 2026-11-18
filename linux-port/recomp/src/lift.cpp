@@ -39,11 +39,15 @@ bool starts_with(const std::string& s, const char* p) { return s.rfind(p, 0) == 
 struct Lifter {
     const Function& fn;
     const std::set<uint64_t>& functions;
+    std::string module;
+    std::string img;  // the C++ name of this module's image base
     LiftResult res;
     std::string body;
     bool unsupported_here = false;
 
-    Lifter(const Function& f, const std::set<uint64_t>& fs) : fn(f), functions(fs) {}
+    Lifter(const Function& f, const std::set<uint64_t>& fs, const std::string& m)
+        : fn(f), functions(fs), module(m), img(m.empty() ? "dcp_img" : "dcp_img_" + m) {}
+    std::string fname(uint64_t a) const { return function_name(a, module); }
 
     void emit(const std::string& s) { body += "  " + s + "\n"; }
     void unsupported(const Insn& in, const char* why = nullptr) {
@@ -59,7 +63,7 @@ struct Lifter {
     static bool gpr(const Operand& o) { return o.kind == OpKind::Reg && o.reg != kNoReg; }
 
     std::string addr(const Operand& m) const {
-        if (m.base == kRip) return fmt("(dcp_img + 0x%llxull)", (unsigned long long)m.rip_target);
+        if (m.base == kRip) return fmt("(%s + 0x%llxull)", img.c_str(), (unsigned long long)m.rip_target);
         std::string e;
         auto add = [&](const std::string& t) { e += e.empty() ? t : " + " + t; };
         if (m.base != kNoReg) add(fmt("r[%d]", m.base));
@@ -121,18 +125,18 @@ struct Lifter {
 
     void call_to(const Insn& in) {
         const uint64_t next = in.addr + in.len;
-        emit(fmt("r[RSP] -= 8; st<u64>(r[RSP], dcp_img + 0x%llxull);", (unsigned long long)next));
+        emit(fmt("r[RSP] -= 8; st<u64>(r[RSP], %s + 0x%llxull);", img.c_str(), (unsigned long long)next));
         emit("DCP_SAVE();");
-        if (in.direct && functions.count(in.target)) emit(function_name(in.target) + "(c);");
-        else if (in.direct) emit(fmt("call_va(c, 0x%llxull);", (unsigned long long)in.target));
+        if (in.direct && functions.count(in.target)) emit(fname(in.target) + "(c);");
+        else if (in.direct) emit(fmt("call_ind(c, %s + 0x%llxull);", img.c_str(), (unsigned long long)in.target));
         else emit(fmt("call_ind(c, %s);", read(in.ops[0], 64).c_str()));
         emit("DCP_LOAD();");
     }
 
     void tail_to(const Insn& in) {
         emit("DCP_SAVE();");
-        if (in.direct && functions.count(in.target)) emit(function_name(in.target) + "(c);");
-        else if (in.direct) emit(fmt("jmp_ind(c, dcp_img + 0x%llxull);", (unsigned long long)in.target));
+        if (in.direct && functions.count(in.target)) emit(fname(in.target) + "(c);");
+        else if (in.direct) emit(fmt("jmp_ind(c, %s + 0x%llxull);", img.c_str(), (unsigned long long)in.target));
         else emit(fmt("jmp_ind(c, %s);", read(in.ops[0], 64).c_str()));
         emit("return;");
     }
@@ -408,13 +412,13 @@ struct Lifter {
     void jump_table(const Insn& in) {
         const JumpTable& jt = fn.jump_tables.at(in.addr);
         const std::string target = read(in.ops[0], 64);
-        emit(fmt("switch (%s - dcp_img) {", target.c_str()));
+        emit(fmt("switch (%s - %s) {", target.c_str(), img.c_str()));
         std::set<uint64_t> seen;
         for (uint64_t t : jt.targets) {
             if (!seen.insert(t).second) continue;
             if (fn.blocks.count(t)) emit(fmt("case 0x%llx: goto %s;", (unsigned long long)t, label(t).c_str()));
-            else if (functions.count(t)) emit(fmt("case 0x%llx: { DCP_SAVE(); %s(c); return; }", (unsigned long long)t, function_name(t).c_str()));
-            else emit(fmt("case 0x%llx: { DCP_SAVE(); jmp_ind(c, dcp_img + 0x%llxull); return; }", (unsigned long long)t, (unsigned long long)t));
+            else if (functions.count(t)) emit(fmt("case 0x%llx: { DCP_SAVE(); %s(c); return; }", (unsigned long long)t, fname(t).c_str()));
+            else emit(fmt("case 0x%llx: { DCP_SAVE(); jmp_ind(c, %s + 0x%llxull); return; }", (unsigned long long)t, img.c_str(), (unsigned long long)t));
         }
         emit(fmt("default: { DCP_SAVE(); jmp_ind(c, %s); return; }", target.c_str()));
         emit("}");
@@ -569,7 +573,7 @@ struct Lifter {
         }
         if (fn.fell_off_end) body += "  __builtin_trap();  // control reaches the end of the function: a noreturn call\n";
 
-        res.code = fmt("extern \"C\" void %s(Ctx* c) {\n", function_name(fn.start).c_str());
+        res.code = fmt("extern \"C\" void %s(Ctx* c) {\n", fname(fn.start).c_str());
         res.code += "  u64 r[16];\n  Vec x[16];\n  Flags fl;\n  DCP_LOAD();\n";
         res.code += body + "}\n";
         return std::move(res);
@@ -578,21 +582,31 @@ struct Lifter {
 
 }  // namespace
 
-std::string function_name(uint64_t start) { return fmt("f_%llx", (unsigned long long)start); }
+std::string function_name(uint64_t start, const std::string& module) {
+    return module.empty() ? fmt("f_%llx", (unsigned long long)start) : fmt("f_%s_%llx", module.c_str(), (unsigned long long)start);
+}
 
-std::string lift_declarations(const std::set<uint64_t>& functions) {
+std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module) {
     std::string out;
-    for (uint64_t f : functions) out += "extern \"C\" void " + function_name(f) + "(Ctx*);\n";
+    if (!module.empty()) out += "extern dcp::rt::u64 dcp_img_" + module + ";\n";
+    for (uint64_t f : functions) out += "extern \"C\" void " + function_name(f, module) + "(Ctx*);\n";
     return out;
 }
 
-std::string lift_function_table(const std::set<uint64_t>& functions) {
-    std::string out = "#include \"dcp_dispatch.h\"\nnamespace {\nconst dcp::rt::FnEntry kFunctions[] = {\n";
-    for (uint64_t f : functions) out += fmt("  {0x%llxu, %s},\n", (unsigned long long)f, function_name(f).c_str());
+std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module) {
+    const std::string sfx = module.empty() ? "" : "_" + module;
+    std::string out = "#include \"dcp_dispatch.h\"\nnamespace {\nconst dcp::rt::FnEntry kFunctions" + sfx + "[] = {\n";
+    for (uint64_t f : functions) out += fmt("  {0x%llxu, %s},\n", (unsigned long long)f, function_name(f, module).c_str());
     if (functions.empty()) out += "  {0, nullptr},\n";
-    out += fmt("};\n}  // namespace\nextern \"C\" void dcp_register(unsigned long long img_base, unsigned long long img_size) {\n"
-               "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, %zu);\n}\n",
-               functions.size());
+    out += "};\n}  // namespace\n";
+    if (module.empty())
+        out += fmt("extern \"C\" void dcp_register(unsigned long long img_base, unsigned long long img_size) {\n"
+                   "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, %zu);\n}\n", functions.size());
+    else
+        out += "dcp::rt::u64 dcp_img_" + module + ";\n" +
+               fmt("extern \"C\" void dcp_register_%s(unsigned long long img_base, unsigned long long img_size) {\n"
+                   "  dcp_img_%s = img_base;\n  dcp::rt::add_module(img_base, img_size, kFunctions%s, %zu);\n}\n",
+                   module.c_str(), module.c_str(), sfx.c_str(), functions.size());
     return out;
 }
 
@@ -611,8 +625,8 @@ using namespace dcp::rt;
 )";
 }
 
-LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions) {
-    Lifter l(fn, functions);
+LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module) {
+    Lifter l(fn, functions, module);
     return l.run();
 }
 
