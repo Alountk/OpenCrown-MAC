@@ -7,6 +7,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -104,6 +105,9 @@ constexpr unsigned ALL = CF | PF | AF | ZF | SF | OF;
 // (default NaN or propagated operand) is the opposite of what the Intel and AMD manuals define; the lifter follows the
 // manuals. These cases compare vector lanes with the sign of NaN lanes ignored, for 32-bit or 64-bit lanes.
 constexpr unsigned NAN32 = 1u << 31, NAN64 = 1u << 30;
+// rcpps / rsqrtps are hardware approximations whose exact bits differ between CPU models (and Rosetta): compare float32
+// lanes with a relative tolerance of 2^-10 (the architectural error bound is 1.5 * 2^-12), NaN equal to NaN, the rest exact.
+constexpr unsigned APPROX32 = 1u << 29;
 constexpr unsigned NOAF = ALL & ~AF;  // and / or / xor / test: AF is architecturally undefined
 
 struct Case { const char* text; unsigned mask; };
@@ -524,6 +528,11 @@ const Case kCases[] = {
     {"vphaddd xmm0, xmm1, xmmword ptr [rbx+16]", 0},
     {"vphsubd xmm0, xmm1, xmm2", 0},
     {"vphsubw xmm0, xmm1, xmm2", 0},
+    // ---- reciprocal estimates (approximate by definition, see APPROX32) ----
+    {"vrcpps xmm0, xmm1", APPROX32}, {"vrcpps ymm0, ymm1", APPROX32}, {"vrcpps xmm0, xmmword ptr [rbx+16]", APPROX32},
+    {"vrsqrtps xmm0, xmm1", APPROX32}, {"vrsqrtps ymm0, ymm1", APPROX32}, {"vrsqrtps xmm0, xmmword ptr [rbx+16]", APPROX32},
+    {"vrcpss xmm0, xmm1, xmm2", APPROX32}, {"vrcpss xmm0, xmm1, dword ptr [rbx+4]", APPROX32},
+    {"vrsqrtss xmm0, xmm1, xmm2", APPROX32}, {"vrsqrtss xmm0, xmm1, dword ptr [rbx+4]", APPROX32},
     // a counted loop (1..8 iterations: ecx is made non-zero first, otherwise dec wraps and it runs 2^32 times)
     {"and ecx, 7\ninc ecx\nxor eax, eax\n1: add rax, rcx\ndec ecx\njnz 1b", ALL},
     // flags set by one instruction and consumed several instructions later
@@ -712,6 +721,22 @@ int main() {
                     std::snprintf(b, sizeof b, "r[%d] native %llx lifted %llx", r, (unsigned long long)nat.r[r], (unsigned long long)lf.r[r]);
                     why = b;
                 }
+            if (cs.mask & APPROX32) {
+                // fold lanes that agree within tolerance onto the native value so the exact comparison below passes
+                for (int v = 0; v < 16; ++v)
+                    for (int h = 0; h < 8; ++h) {
+                        float a, b;
+                        uint32_t ua, ub;
+                        std::memcpy(&ua, reinterpret_cast<uint8_t*>(nat.x[v].q) + 4 * h, 4);
+                        std::memcpy(&ub, reinterpret_cast<uint8_t*>(lf.x[v].q) + 4 * h, 4);
+                        std::memcpy(&a, &ua, 4);
+                        std::memcpy(&b, &ub, 4);
+                        const bool both_nan = a != a && b != b;
+                        const bool close = std::isfinite(a) && std::isfinite(b) && a != 0 && b != 0 && (a < 0) == (b < 0) &&
+                                           std::fabs(a - b) <= std::fabs(a) * 0.0009765625f;
+                        if (both_nan || close) std::memcpy(reinterpret_cast<uint8_t*>(lf.x[v].q) + 4 * h, &ua, 4);
+                    }
+            }
             if (cs.mask & (NAN32 | NAN64)) {
                 for (auto* v : {&nat, &lf})
                     for (auto& vec : v->x)
