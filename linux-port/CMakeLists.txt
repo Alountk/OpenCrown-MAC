@@ -275,6 +275,13 @@ if(DCP_RECOMP)
   # Runtime of recompiled code (guest-address dispatch). Plain C++, builds for the target architecture (arm64 too).
   add_library(dcp_rt STATIC recomp/runtime/dcp_dispatch.cpp recomp/runtime/dcp_guest.cpp)
   target_include_directories(dcp_rt PUBLIC recomp/runtime)
+  add_executable(test_atomic recomp/tests/test_atomic.cpp)
+  target_include_directories(test_atomic PRIVATE recomp/runtime)
+  target_link_libraries(test_atomic PRIVATE Threads::Threads)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+    target_compile_options(test_atomic PRIVATE -mcx16)  # cmpxchg16b inline instead of libatomic
+  endif()
+  add_test(NAME atomic COMMAND test_atomic)
   add_executable(test_abi recomp/tests/test_abi.cpp)
   target_include_directories(test_abi PRIVATE recomp/runtime)
   add_test(NAME abi COMMAND test_abi)

@@ -150,6 +150,27 @@ const Case kCases[] = {
     {"mov r15, qword ptr [rbx+8]", 0}, {"mov qword ptr [rbx+16], r14", 0}, {"movzx r9d, word ptr [rbx+6]", 0},
     {"movsxd r10, r11d", 0}, {"shl r12, 3", ALL & ~(AF | OF)}, {"cmovz r8, r15", 0}, {"xchg r9, r10", 0}, {"bswap r13d", 0},
     {"push r12\npop r15", 0}, {"mov r8, rbx\nand r9d, 7\nmov rax, qword ptr [r8+r9*8]", 0},
+    // cmpxchg: only ZF is compared. Rosetta 2 leaves CF/PF/AF/SF/OF as for `dest - accumulator`; the manuals' pseudo-code (and QEMU)
+    // compare `accumulator - dest`, which is what the lifter does, and no code branches on those flags after a cmpxchg.
+    // ---- atomics: lock-prefixed read-modify-write, xchg with memory, xadd, cmpxchg (single-threaded equivalence) ----
+    {"lock add qword ptr [rbx+8], rcx", ALL}, {"lock add dword ptr [rbx+4], ecx", ALL}, {"lock add word ptr [rbx+2], cx", ALL},
+    {"lock add byte ptr [rbx+1], cl", ALL}, {"lock add qword ptr [rbx], 5", ALL}, {"lock sub qword ptr [rbx+8], rcx", ALL},
+    {"lock sub dword ptr [rbx+4], 1", ALL}, {"lock adc qword ptr [rbx], rcx", ALL}, {"lock sbb dword ptr [rbx+4], ecx", ALL},
+    {"lock and qword ptr [rbx+8], rcx", NOAF}, {"lock and dword ptr [rbx], 0xff", NOAF}, {"lock or qword ptr [rbx+8], rcx", NOAF},
+    {"lock or dword ptr [rbx+4], 0x80000000", NOAF}, {"lock xor qword ptr [rbx], rcx", NOAF}, {"lock xor byte ptr [rbx+3], 0x55", NOAF},
+    {"lock inc qword ptr [rbx+8]", ALL & ~CF}, {"lock inc dword ptr [rbx]", ALL & ~CF}, {"lock dec qword ptr [rbx+8]", ALL & ~CF},
+    {"lock dec word ptr [rbx+2]", ALL & ~CF}, {"lock neg qword ptr [rbx]", ALL}, {"lock neg dword ptr [rbx+4]", ALL}, {"lock not qword ptr [rbx+8]", 0},
+    {"lock bts qword ptr [rbx], 5", CF}, {"lock btr dword ptr [rbx+4], 31", CF}, {"lock btc qword ptr [rbx+8], 63", CF},
+    {"bts rax, 5", CF}, {"btr eax, 31", CF}, {"btc rax, rcx", CF}, {"bts rax, rcx", CF}, {"btr ax, 3", CF}, {"btc eax, 0", CF},
+    {"xchg qword ptr [rbx], rcx", 0}, {"xchg dword ptr [rbx+4], ecx", 0}, {"xchg byte ptr [rbx+1], dl", 0},
+    {"lock xadd qword ptr [rbx], rcx", ALL}, {"lock xadd dword ptr [rbx+4], ecx", ALL}, {"lock xadd word ptr [rbx+2], cx", ALL},
+    {"lock xadd byte ptr [rbx+1], cl", ALL}, {"xadd rax, rcx", ALL}, {"xadd eax, ecx", ALL}, {"xadd al, cl", ALL},
+    {"lock cmpxchg qword ptr [rbx], rcx", ZF}, {"lock cmpxchg dword ptr [rbx+4], ecx", ZF}, {"lock cmpxchg word ptr [rbx+2], cx", ZF},
+    {"lock cmpxchg byte ptr [rbx+1], cl", ZF},
+    {"mov rax, qword ptr [rbx]\nlock cmpxchg qword ptr [rbx], rcx", ZF}, {"mov eax, dword ptr [rbx+4]\nlock cmpxchg dword ptr [rbx+4], ecx", ZF},
+    {"mov al, byte ptr [rbx+1]\nlock cmpxchg byte ptr [rbx+1], cl", ZF}, {"mov rax, qword ptr [rbx]\ncmpxchg rdx, rcx", ZF},
+    {"cmpxchg rdx, rcx", ZF}, {"mov eax, edx\ncmpxchg edx, ecx", ZF}, {"cmpxchg dl, cl", ZF},
+    {"lock cmpxchg16b xmmword ptr [rbx]", ZF}, {"mov rax, qword ptr [rbx]\nmov rdx, qword ptr [rbx+8]\nlock cmpxchg16b xmmword ptr [rbx]", ZF},
     // ---- stack ----
     {"push rbx\npop rcx", 0}, {"push 0x12345678\npop rax", 0}, {"push -3\npop rdx", 0}, {"push qword ptr [rbx]\npop rax", 0},
     {"push rax\npush rcx\npop rdx\npop rsi", 0}, {"push rbx\npop qword ptr [rbx+8]", 0},
@@ -683,7 +704,7 @@ int main() {
         std::ofstream f(dir + "/lifted.cpp");
         f << lifted;
     }
-    if (!sh(cxx + " " + arch + " -std=c++20 -O1 -DDCP_TEST_FLAGS -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
+    if (!sh(cxx + " " + arch + " -std=c++20 -O1 -mcx16 -DDCP_TEST_FLAGS -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
                 "/lifted.so " + dir + "/lifted.cpp",
             dir + "/cc.log")) {
         std::fprintf(stderr, "lift_diff: compiling the lifted code failed:\n");

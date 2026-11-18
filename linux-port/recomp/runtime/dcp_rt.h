@@ -799,4 +799,52 @@ template <int B> inline Vec vprsqrt(const Vec& a) {
     return r;
 }
 
+// ---- atomics ----------------------------------------------------------------------------------------------------
+// lock-prefixed read-modify-write, xchg with memory, xadd, cmpxchg. Sequentially consistent, like the hardware. A location
+// that is not naturally aligned (a "split lock", rare and slow on x86) is accessed non-atomically.
+
+template <class T, class Op> inline T atomic_rmw(u64 a, Op op) {  // returns the old value; op(old) is the new one
+    if (a % sizeof(T)) {
+        const T o = ld<T>(a);
+        st<T>(a, op(o));
+        return o;
+    }
+    T* p = reinterpret_cast<T*>(a);
+    T old = __atomic_load_n(p, __ATOMIC_SEQ_CST);
+    while (!__atomic_compare_exchange_n(p, &old, op(old), false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+    }
+    return old;
+}
+// cmpxchg: on failure `expected` receives the value found
+template <class T> inline bool atomic_cas(u64 a, T& expected, T desired) {
+    if (a % sizeof(T)) {
+        const T cur = ld<T>(a);
+        if (cur == expected) return st<T>(a, desired), true;
+        return expected = cur, false;
+    }
+    return __atomic_compare_exchange_n(reinterpret_cast<T*>(a), &expected, desired, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+}
+// cmpxchg16b: expected / desired are {low, high}
+inline bool atomic_cas128(u64 a, u64* expected, const u64* desired) {
+    u128 exp = u128(expected[1]) << 64 | expected[0];
+    const u128 des = u128(desired[1]) << 64 | desired[0];
+    bool ok;
+    if (a % 16) {
+        u128 cur;
+        std::memcpy(&cur, reinterpret_cast<const void*>(a), 16);
+        ok = cur == exp;
+        if (ok) std::memcpy(reinterpret_cast<void*>(a), &des, 16);
+        else exp = cur;
+    } else {
+        ok = __atomic_compare_exchange_n(reinterpret_cast<u128*>(a), &exp, des, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST);
+    }
+    expected[0] = u64(exp), expected[1] = u64(exp >> 64);
+    return ok;
+}
+
+// bts / btr / btc on a value: the old bit goes to CF
+template <class T> inline T bit_set(T v, u64 n, Flags& f) { n %= bits_of<T>; f.cf = (v >> n) & 1; return T(v | (T(1) << n)); }
+template <class T> inline T bit_reset(T v, u64 n, Flags& f) { n %= bits_of<T>; f.cf = (v >> n) & 1; return T(v & ~(T(1) << n)); }
+template <class T> inline T bit_flip(T v, u64 n, Flags& f) { n %= bits_of<T>; f.cf = (v >> n) & 1; return T(v ^ (T(1) << n)); }
+
 }  // namespace dcp::rt
