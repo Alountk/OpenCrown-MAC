@@ -144,6 +144,75 @@ struct Lifter {
     }
     void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
 
+    // Blends, shuffles, lane inserts / extracts and broadcasts. Returns false when `in` is none of them.
+    bool shuffle_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& d = in.ops[0];
+        const Operand& s = in.ops[1];
+        const Operand& t = in.ops[2];
+        const int B = d.bits;
+        const bool ps = mn.size() > 2 && mn.compare(mn.size() - 2, 2, "ps") == 0;
+        const char* U = ps ? "u32" : "u64";
+        auto imm = [&](const Operand& o) { return unsigned(o.imm) & 0xffu; };
+        auto V = [&](const std::string& e) { vset(d, e); return true; };
+
+        if ((mn == "vblendvps" || mn == "vblendvpd") && in.nops == 4)
+            return V(fmt("vblendv<%s, %d>(%s, %s, x[%d])", U, B, vread(s).c_str(), vread(t).c_str(), in.ops[3].vec));
+        if ((mn == "vblendps" || mn == "vblendpd") && in.nops == 4)
+            return V(fmt("vblendi<%s, %d>(%s, %s, %uu)", U, B, vread(s).c_str(), vread(t).c_str(), imm(in.ops[3])));
+        if (mn == "vpermilps" || mn == "vpermilpd") {
+            const bool immf = t.kind == OpKind::Imm;
+            const std::string name = mn == "vpermilps" ? "vpermilps" : "vpermilpd";
+            if (immf) return V(fmt("%s_i<%d>(%s, %uu)", name.c_str(), B, vread(s).c_str(), imm(t)));
+            return V(fmt("%s_v<%d>(%s, %s)", name.c_str(), B, vread(s).c_str(), vread(t).c_str()));
+        }
+        if (mn == "vinsertps" && in.nops == 4)
+            return V(fmt("vinsertps(x[%d], %s, %uu, %s)", s.vec, vread(t).c_str(), imm(in.ops[3]), is_vec(t) ? "false" : "true"));
+        if (mn == "vinsertf128" && in.nops == 4)
+            return V(fmt("vinsert128(x[%d], %s, %uu)", s.vec, vread(t).c_str(), imm(in.ops[3])));
+        if (mn == "vextractf128" && in.nops == 3) {
+            if (is_vec(d)) return V(fmt("vextract128(x[%d], %uu)", s.vec, imm(t)));
+            emit(fmt("vst<128>(%s, vextract128(x[%d], %uu));", addr(d).c_str(), s.vec, imm(t)));
+            return true;
+        }
+        if (mn == "vperm2f128" && in.nops == 4)
+            return V(fmt("vperm2f128(x[%d], %s, %uu)", s.vec, vread(t).c_str(), imm(in.ops[3])));
+        if (mn == "vbroadcastss" || mn == "vbroadcastsd") {
+            const char* T = mn == "vbroadcastss" ? "u32" : "u64";
+            return V(fmt("vbcast<%s, %d>(%s)", T, B, is_vec(s) ? fmt("vlo<%s>(x[%d])", T, s.vec).c_str()
+                                                                  : fmt("ld<%s>(%s)", T, addr(s).c_str()).c_str()));
+        }
+        if (mn == "vbroadcastf128") return V(fmt("vbcast128(%s)", vread(s).c_str()));
+        if (mn == "vmovshdup" || mn == "vmovsldup" || mn == "vmovddup") return V(fmt("%s<%d>(%s)", mn.c_str(), B, vread(s).c_str()));
+        static const char* unp[] = {"vunpcklps", "vunpckhps", "vunpcklpd", "vunpckhpd"};
+        for (int k = 0; k < 4; ++k)
+            if (mn == unp[k] && in.nops == 3)
+                return V(fmt("vunpck<%s, %s, %d>(%s, %s)", k < 2 ? "u32" : "u64", k % 2 ? "true" : "false", B, vread(s).c_str(),
+                             vread(t).c_str()));
+        if ((mn == "vshufps" || mn == "vshufpd") && in.nops == 4)
+            return V(fmt("%s<%d>(%s, %s, %uu)", mn.c_str(), B, vread(s).c_str(), vread(t).c_str(), imm(in.ops[3])));
+        if (mn == "vextractps" && in.nops == 3) {
+            const std::string e = fmt("lane<u32>(x[%d], %u)", s.vec, imm(t) & 3u);
+            if (d.kind == OpKind::Mem) emit(fmt("st<u32>(%s, %s);", addr(d).c_str(), e.c_str()));
+            else emit(write(d, e));
+            return true;
+        }
+        if (mn == "vmovlps" || mn == "vmovhps") {
+            const int idx = mn == "vmovhps" ? 1 : 0;
+            if (in.nops == 3) return V(fmt("vmk(%s, %s)", idx ? fmt("x[%d].q[0]", s.vec).c_str() : fmt("ld<u64>(%s)", addr(t).c_str()).c_str(),
+                                            idx ? fmt("ld<u64>(%s)", addr(t).c_str()).c_str() : fmt("x[%d].q[1]", s.vec).c_str()));
+            emit(fmt("st<u64>(%s, x[%d].q[%d]);", addr(d).c_str(), s.vec, idx));
+            return true;
+        }
+        if (mn == "vmovlhps" && in.nops == 3) return V(fmt("vmk(x[%d].q[0], x[%d].q[0])", s.vec, t.vec));
+        if (mn == "vmovhlps" && in.nops == 3) return V(fmt("vmk(x[%d].q[1], x[%d].q[1])", t.vec, s.vec));
+        if (mn == "vmovmskps" || mn == "vmovmskpd") {
+            emit(write(d, fmt("vmovmsk<%s, %d>(x[%d])", mn == "vmovmskps" ? "u32" : "u64", s.bits, s.vec)));
+            return true;
+        }
+        return false;
+    }
+
     void vector_insn(const Insn& in) {
         const std::string& mn = in.mnemonic;
         const Operand& d = in.ops[0];
@@ -251,6 +320,7 @@ struct Lifter {
         if (mn == "vcvtdq2ps" && in.nops == 2) return vset(d, fmt("vpcvtdq2ps<%d>(%s)", d.bits, vread(s).c_str()));
         if (mn == "vcvttps2dq" && in.nops == 2) return vset(d, fmt("vpcvttps2dq<%d>(%s)", d.bits, vread(s).c_str()));
 
+        if (shuffle_insn(in)) return;
         unsupported(in);
     }
 
