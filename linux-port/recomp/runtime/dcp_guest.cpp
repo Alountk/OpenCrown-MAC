@@ -29,6 +29,11 @@ u64 call_guest(u64 fn, u64 a0, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5) {
     return result;
 }
 
+void guest_call_outside_host() {
+    std::fprintf(stderr, "dcp: a guest callback with several arguments was called outside a host call\n");
+    std::abort();
+}
+
 u64 run_guest(u64 fn, u64 arg, size_t stack_size) {
     constexpr size_t kGuard = 1 << 14;  // one page of any size in use on macOS and Linux
     void* mem = mmap(nullptr, stack_size + kGuard, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

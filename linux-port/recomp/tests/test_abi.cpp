@@ -114,11 +114,26 @@ static void test_pointers_and_small_types() {
     CHECK(std::strcmp(reinterpret_cast<const char*>(n.c.r[RAX]), "one") == 0);
 }
 
+// A class that knows how to build itself from a guest register word (the HLE's guest-callback wrapper does).
+struct Handle {
+    u64 word = 0;
+    static Handle from_guest_word(u64 w) { return Handle{w * 2}; }
+};
+static u64 take_handle(Handle h, int tail) { return h.word + u64(tail); }
+
+static void test_word_constructible_arguments() {
+    Frame f;
+    f.c.r[RDI] = 21, f.c.r[RSI] = 5;
+    thunk<take_handle>(&f.c);
+    CHECK(f.c.r[RAX] == 47);  // the handle consumed rdi, the int the next register, rsi
+}
+
 int main() {
     test_integers();
     test_stack_arguments();
     test_floating_point();
     test_pointers_and_small_types();
+    test_word_constructible_arguments();
     if (g_fail) return std::fprintf(stderr, "abi: %d check(s) failed\n", g_fail), 1;
     std::puts("abi: all tests passed");
     return 0;

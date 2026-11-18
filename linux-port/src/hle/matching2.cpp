@@ -98,10 +98,10 @@ enum : uint16_t { kRoomEvKicked = 0x1103, kRoomEvDestroyed = 0x1104, kRoomEvOwne
                   kRoomEvInternalUpdated = 0x1106, kRoomEvMemberJoined = 0x8101, kRoomEvMemberLeft = 0x8102 };
 enum : uint16_t { kSigEvDead = 0x5101, kSigEvEstablished = 0x5102 };
 
-using ReqCb = DCP_SYSV void (*)(uint16_t ctx, uint32_t req, uint16_t ev, int32_t err, const void* data, void* arg);
-using CtxCb = DCP_SYSV void (*)(uint16_t ctx, uint16_t ev, uint8_t cause, int32_t err, void* arg);
-using RoomCb = DCP_SYSV void (*)(uint16_t ctx, uint64_t room, uint16_t ev, const void* data, void* arg);
-using SigCb = DCP_SYSV void (*)(uint16_t ctx, uint64_t room, uint16_t member, uint16_t ev, int32_t err, void* arg);
+using ReqCb = GuestFn<void(uint16_t ctx, uint32_t req, uint16_t ev, int32_t err, const void* data, void* arg)>;
+using CtxCb = GuestFn<void(uint16_t ctx, uint16_t ev, uint8_t cause, int32_t err, void* arg)>;
+using RoomCb = GuestFn<void(uint16_t ctx, uint64_t room, uint16_t ev, const void* data, void* arg)>;
+using SigCb = GuestFn<void(uint16_t ctx, uint64_t room, uint16_t member, uint16_t ev, int32_t err, void* arg)>;
 
 template <class T> T rd(const void* p, size_t off) {
     T v;
@@ -476,7 +476,7 @@ DCP_SYSV int32_t sceNpMatching2CreateContextA(const void* param, uint16_t* ctx) 
 }
 DCP_SYSV int32_t sceNpMatching2RegisterContextCallback(void* cb, void* arg) {
     std::lock_guard<std::mutex> lk(g_mu);
-    g_ctx_cb = reinterpret_cast<CtxCb>(cb), g_ctx_arg = arg;
+    g_ctx_cb = CtxCb(cb), g_ctx_arg = arg;
     return kOk;
 }
 DCP_SYSV int32_t sceNpMatching2ContextStart(uint16_t ctx, uint64_t) {
@@ -649,12 +649,12 @@ DCP_SYSV int32_t sceNpMatching2SetRoomDataExternal(uint16_t, const uint8_t* req,
 }
 DCP_SYSV int32_t sceNpMatching2RegisterRoomEventCallback(uint16_t, void* cb, void* arg) {
     std::lock_guard<std::mutex> lk(g_mu);
-    g_room_cb = reinterpret_cast<RoomCb>(cb), g_room_arg = arg;
+    g_room_cb = RoomCb(cb), g_room_arg = arg;
     return kOk;
 }
 DCP_SYSV int32_t sceNpMatching2RegisterSignalingCallback(uint16_t, void* cb, void* arg) {
     std::lock_guard<std::mutex> lk(g_mu);
-    g_sig_cb = reinterpret_cast<SigCb>(cb), g_sig_arg = arg;
+    g_sig_cb = SigCb(cb), g_sig_arg = arg;
     return kOk;
 }
 DCP_SYSV int32_t sceNpMatching2SignalingGetLocalNetInfo(uint8_t* info) {

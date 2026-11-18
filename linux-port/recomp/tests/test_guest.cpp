@@ -14,6 +14,7 @@ static int g_fail = 0;
 #define CHECK(c) do { if (!(c)) { std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #c); ++g_fail; } } while (0)
 
 alignas(16) static unsigned char g_image[0x1000];
+static int g_tid_calls = 0;
 
 // guest function 0x10: rax = rdi * 2 (and it trashes the caller-saved and a callee-saved register, like real code would
 // before restoring it; here it "forgets" to restore rbx to prove the bridge does).
@@ -51,10 +52,12 @@ static void guest_outer(Ctx* c) {  // rax = host_nested(0x40, rdi)
     c->r[RSP] += 8;
 }
 
+static void guest_void(Ctx* c);
+
 static void setup() {
-    static const FnEntry table[] = {{0x10, guest_double}, {0x20, guest_caller}, {0x30, guest_outer}, {0x40, guest_inner}};
+    static const FnEntry table[] = {{0x10, guest_double}, {0x20, guest_caller}, {0x30, guest_outer}, {0x40, guest_inner}, {0x50, guest_void}};
     set_image(reinterpret_cast<u64>(g_image), sizeof g_image);
-    set_function_table(table, 4);
+    set_function_table(table, 5);
     register_host_function(reinterpret_cast<void*>(&host_apply), thunk<host_apply>);
     register_host_function(reinterpret_cast<void*>(&host_nested), thunk<host_nested>);
 }
@@ -91,6 +94,32 @@ static void test_register_preservation() {
     CHECK(seen_after.r[RSP] == seen_before.r[RSP]);
 }
 
+// A callback typed the way the HLE declares guest function pointers.
+using GuestFn = u64 (*)(u64);
+static u64 host_via_pointer(GuestFn cb, u64 x) { return guest_call(cb, x) + 1; }
+static void guest_void(Ctx* c) { ++g_tid_calls, c->r[RSP] += 8; }
+static u64 host_once(void (*cb)()) { guest_call(cb); guest_call(cb); return 0; }
+
+static void test_typed_calls() {
+    register_host_function(reinterpret_cast<void*>(&host_via_pointer), thunk<host_via_pointer>);
+    register_host_function(reinterpret_cast<void*>(&host_once), thunk<host_once>);
+    const GuestFn dbl = reinterpret_cast<GuestFn>(reinterpret_cast<u64>(g_image) + 0x10);
+    // outside any host call (a thread's entry point): a fresh register file and stack
+    CHECK(guest_call(dbl, u64(9)) == 18);
+    // inside a host function the guest called: on the caller's own context
+    alignas(16) static u64 stack[64];
+    Ctx c{};
+    c.r[RSP] = reinterpret_cast<u64>(&stack[32]);
+    c.r[RDI] = reinterpret_cast<u64>(dbl), c.r[RSI] = 20;
+    call_ind(&c, reinterpret_cast<u64>(&host_via_pointer));
+    CHECK(c.r[RAX] == 41);
+    // void callbacks without arguments (scePthreadOnce)
+    c.r[RSP] = reinterpret_cast<u64>(&stack[32]);
+    c.r[RDI] = reinterpret_cast<u64>(g_image) + 0x50;
+    call_ind(&c, reinterpret_cast<u64>(&host_once));
+    CHECK(g_tid_calls == 2);
+}
+
 static void test_concurrent_threads() {
     // Each thread has its own Ctx and guest stack.
     std::thread t[4];
@@ -105,6 +134,7 @@ int main() {
     setup();
     test_thread_entry();
     test_register_preservation();
+    test_typed_calls();
     test_concurrent_threads();
     if (g_fail) return std::fprintf(stderr, "guest: %d check(s) failed\n", g_fail), 1;
     std::puts("guest: all tests passed");
