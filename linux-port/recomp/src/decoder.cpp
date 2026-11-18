@@ -85,6 +85,7 @@ bool decode(const uint8_t* code, size_t avail, uint64_t addr, Insn& out) {
             d.kind = OpKind::Reg;
             d.reg = gpr_index(o.reg.value, d.high8);
             d.vec = vec_index(o.reg.value);
+            if (ZydisRegisterGetClass(o.reg.value) == ZYDIS_REGCLASS_X87) d.st = int8_t(ZydisRegisterGetId(o.reg.value));
         } else if (o.type == ZYDIS_OPERAND_TYPE_MEMORY) {
             d.kind = OpKind::Mem;
             bool h = false;

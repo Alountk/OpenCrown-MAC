@@ -27,11 +27,21 @@ struct Vec {
     u64 q[4];
 };
 
+// The x87 register stack, modelled with doubles (the PS4's 80-bit extended precision is not available on arm64). The stack is empty
+// across calls by the ABI, so this state is only live inside a function; it lives in the Ctx for simplicity.
+struct Fpu {
+    double r[8] = {};
+    u32 top = 0;
+    u16 cw = 0x37f;  // control word: bits 10-11 select the rounding mode
+    u16 c = 0;       // condition codes C0 (0x100), C1 (0x200), C2 (0x400), C3 (0x4000) of the status word
+};
+
 struct Ctx {
     u64 r[16];
     u64 rflags;  // only meaningful when built with DCP_TEST_FLAGS (the differential tests)
     u64 pad_[3];
     Vec x[16];   // ymm0..15
+    Fpu fpu;
 };
 static_assert(__builtin_offsetof(Ctx, x) == 160, "the differential test's assembly trampoline hard-codes this layout");
 
@@ -872,5 +882,108 @@ template <class F, class I> inline I fcvtn(FU<F> a) {
     if (!(r >= -hi && r < hi)) return std::numeric_limits<I>::min();
     return I(r);
 }
+
+// ---- x87 -----------------------------------------------------------------------------------------------------------
+namespace x87 {
+
+inline double& reg(Fpu& f, int i) { return f.r[(f.top + unsigned(i)) & 7]; }
+inline void push(Fpu& f, double v) { f.top = (f.top - 1) & 7, f.r[f.top] = v; }
+inline double pop(Fpu& f) {
+    const double v = f.r[f.top];
+    f.top = (f.top + 1) & 7;
+    return v;
+}
+
+// 80-bit extended <-> double (round to nearest even on the way in, exact on the way out)
+inline double from80(u64 addr) {
+    u8 b[10];
+    std::memcpy(b, reinterpret_cast<const void*>(addr), 10);
+    u64 m;
+    std::memcpy(&m, b, 8);
+    const int e = ((b[9] & 0x7f) << 8) | b[8];
+    const bool neg = b[9] & 0x80;
+    double v;
+    if (e == 0x7fff) v = (m << 1) == 0 ? std::numeric_limits<double>::infinity() : std::numeric_limits<double>::quiet_NaN();
+    else if (m == 0) v = 0.0;
+    else v = std::ldexp(double(m), e - 16383 - 63);
+    return neg ? -v : v;
+}
+inline void to80(u64 addr, double v) {
+    u8 b[10] = {};
+    u64 m = 0;
+    int e = 0;
+    const bool neg = std::signbit(v);
+    if (std::isnan(v)) e = 0x7fff, m = 0xC000000000000000ull;
+    else if (std::isinf(v)) e = 0x7fff, m = 0x8000000000000000ull;
+    else if (v != 0) {
+        int ex;
+        const double f = std::frexp(std::fabs(v), &ex);  // f in [0.5, 1)
+        m = static_cast<u64>(std::ldexp(f, 64));
+        e = ex - 1 + 16383;
+    }
+    std::memcpy(b, &m, 8);
+    b[8] = u8(e), b[9] = u8((e >> 8) | (neg ? 0x80 : 0));
+    std::memcpy(reinterpret_cast<void*>(addr), b, 10);
+}
+inline double ld32(u64 a) { return double(fbits<float>(ld<u32>(a))); }
+inline double ld64(u64 a) {  // loading a signalling NaN yields the quiet one
+    u64 bits = ld<u64>(a);
+    if (std::isnan(fbits<double>(bits))) bits |= 0x0008000000000000ull;
+    return fbits<double>(bits);
+}
+inline void st32(u64 a, double v) { st<u32>(a, fraw<float>(float(v))); }
+inline void st64(u64 a, double v) { st<u64>(a, fraw<double>(v)); }
+
+// rounding per the control word (RC = bits 10-11): nearest even, down, up, toward zero
+inline double round_cw(const Fpu& f, double v) {
+    switch ((f.cw >> 10) & 3) {
+    case 0: return std::nearbyint(v);
+    case 1: return std::floor(v);
+    case 2: return std::ceil(v);
+    default: return std::trunc(v);
+    }
+}
+template <class I> inline I to_int(double v) {  // out of range or NaN: the integer indefinite
+    constexpr double lim = double(I(1) << (bits_of<I> - 2)) * 2.0;
+    if (!(v >= -lim && v < lim)) return std::numeric_limits<I>::min();
+    return I(v);
+}
+template <class I> inline void fist(Fpu& f, u64 a, bool truncate) { st<I>(a, to_int<I>(truncate ? std::trunc(reg(f, 0)) : round_cw(f, reg(f, 0)))); }
+template <class I> inline void fild(Fpu& f, u64 a) { push(f, double(ld<I>(a))); }
+
+inline double sub_of(double a, double b) { return a - b; }
+inline void compare(Fpu& f, double a, double b) {  // fcom family: C3 C2 C0 = equal / unordered / less
+    f.c &= u16(~0x4700);
+    if (std::isnan(a) || std::isnan(b)) f.c |= 0x4500;
+    else if (a < b) f.c |= 0x0100;
+    else if (a == b) f.c |= 0x4000;
+}
+inline void fcomi(double a, double b, Flags& fl) {  // fucomi / fcomi: ZF PF CF
+    fl.of = fl.sf = fl.af = false;
+    if (std::isnan(a) || std::isnan(b)) return fl.zf = fl.pf = fl.cf = true, void();
+    fl.pf = false, fl.zf = a == b, fl.cf = a < b;
+}
+inline u16 status(const Fpu& f) { return u16(f.c | (f.top << 11)); }
+inline void set_status(Fpu& f, u16 sw) { f.top = (sw >> 11) & 7, f.c = sw & 0x4700; }
+inline void fnstenv(const Fpu& f, u64 a) {  // the 28-byte protected-mode environment; the instruction / operand pointers are zero
+    u8 env[28] = {};
+    std::memcpy(env, &f.cw, 2);
+    const u16 sw = status(f), tw = 0xffff;
+    std::memcpy(env + 4, &sw, 2);
+    std::memcpy(env + 8, &tw, 2);
+    std::memcpy(reinterpret_cast<void*>(a), env, 28);
+}
+inline void fldenv(Fpu& f, u64 a) {
+    u16 cw, sw;
+    std::memcpy(&cw, reinterpret_cast<const void*>(a), 2);
+    std::memcpy(&sw, reinterpret_cast<const void*>(a + 4), 2);
+    f.cw = cw, set_status(f, sw);
+}
+inline void fscale(Fpu& f) {
+    const double e = std::trunc(reg(f, 1));
+    reg(f, 0) = std::ldexp(reg(f, 0), int(std::fmax(-100000.0, std::fmin(100000.0, e))));
+}
+
+}  // namespace x87
 
 }  // namespace dcp::rt

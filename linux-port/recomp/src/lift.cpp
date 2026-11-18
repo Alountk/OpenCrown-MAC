@@ -150,6 +150,108 @@ struct Lifter {
     }
     void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
 
+    // x87, modelled on the Fpu in the Ctx (doubles, not 80-bit extended). Every x87 mnemonic starts with 'f'.
+    void x87_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& a = in.ops[0];
+        const Operand& b = in.ops[1];
+        const std::string f = "c->fpu";
+        auto st = [&](int i) { return fmt("x87::reg(%s, %d)", f.c_str(), i); };
+        auto ldm = [&](const Operand& m) -> std::string {  // a floating-point memory operand as a double
+            if (m.bits == 32) return fmt("x87::ld32(%s)", addr(m).c_str());
+            if (m.bits == 64) return fmt("x87::ld64(%s)", addr(m).c_str());
+            return fmt("x87::from80(%s)", addr(m).c_str());
+        };
+        auto stm = [&](const Operand& m, const std::string& v) {
+            if (m.bits == 32) emit(fmt("x87::st32(%s, %s);", addr(m).c_str(), v.c_str()));
+            else if (m.bits == 64) emit(fmt("x87::st64(%s, %s);", addr(m).c_str(), v.c_str()));
+            else emit(fmt("x87::to80(%s, %s);", addr(m).c_str(), v.c_str()));
+        };
+        auto is_st = [](const Operand& o) { return o.kind == OpKind::Reg && o.st != kNoReg; };
+        auto pop = [&] { emit(fmt("(void)x87::pop(%s);", f.c_str())); };
+        auto push = [&](const std::string& v) { emit(fmt("x87::push(%s, %s);", f.c_str(), v.c_str())); };
+
+        if (mn == "fwait" || mn == "fnop" || mn == "fnclex" || mn == "wait") return;
+        if (mn == "fninit") return emit(fmt("%s = Fpu();", f.c_str()));
+        // constants
+        static const struct { const char* mn; const char* v; } consts[] = {
+            {"fld1", "1.0"}, {"fldz", "0.0"}, {"fldpi", "3.14159265358979323846"}, {"fldl2e", "1.44269504088896340736"},
+            {"fldl2t", "3.32192809488736234787"}, {"fldlg2", "0.30102999566398119521"}, {"fldln2", "0.69314718055994530942"}};
+        for (const auto& k : consts)
+            if (mn == k.mn) return push(k.v);
+        if (mn == "fld" && in.nops == 1) {
+            if (is_st(a)) return emit(fmt("{ double v = %s; x87::push(%s, v); }", st(a.st).c_str(), f.c_str()));
+            return push(ldm(a));
+        }
+        if (mn == "fild") return emit(fmt("x87::fild<i%d>(%s, %s);", a.bits, f.c_str(), addr(a).c_str()));
+        if (mn == "fist" || mn == "fistp" || mn == "fisttp") {
+            emit(fmt("x87::fist<i%d>(%s, %s, %s);", a.bits, f.c_str(), addr(a).c_str(), mn == "fisttp" ? "true" : "false"));
+            if (mn != "fist") pop();
+            return;
+        }
+        if (mn == "fst" || mn == "fstp") {
+            if (is_st(a)) emit(fmt("%s = %s;", st(a.st).c_str(), st(0).c_str()));
+            else stm(a, st(0));
+            if (mn == "fstp") pop();
+            return;
+        }
+        // arithmetic: st(dst) = st(dst) OP src, subr / divr with the operands swapped; the p forms pop afterwards
+        static const struct { const char* n; const char* op; bool rev; } arith[] = {
+            {"add", "+", false}, {"sub", "-", false}, {"subr", "-", true}, {"mul", "*", false}, {"div", "/", false}, {"divr", "/", true}};
+        for (const auto& k : arith) {
+            const std::string base = std::string("f") + k.n;
+            const bool popf = mn == base + "p";
+            if (mn != base && !popf) continue;
+            std::string dst, src;
+            if (in.nops == 1) dst = st(0), src = ldm(a);
+            else dst = st(a.st), src = st(b.st);
+            const std::string l = k.rev ? src : dst, r = k.rev ? dst : src;
+            emit(fmt("{ double l_ = %s, r_ = %s; %s = l_ %s r_; }", l.c_str(), r.c_str(), dst.c_str(), k.op));
+            if (popf) pop();
+            return;
+        }
+        if (mn == "fchs") return emit(fmt("%s = -%s;", st(0).c_str(), st(0).c_str()));
+        if (mn == "fabs") return emit(fmt("%s = std::fabs(%s);", st(0).c_str(), st(0).c_str()));
+        if (mn == "fsqrt") return emit(fmt("%s = std::sqrt(%s);", st(0).c_str(), st(0).c_str()));
+        if (mn == "frndint") return emit(fmt("%s = x87::round_cw(%s, %s);", st(0).c_str(), f.c_str(), st(0).c_str()));
+        if (mn == "fprem1") return emit(fmt("%s = std::remainder(%s, %s); %s.c &= 0xfbff;", st(0).c_str(), st(0).c_str(), st(1).c_str(), f.c_str()));
+        if (mn == "fprem") return emit(fmt("%s = std::fmod(%s, %s); %s.c &= 0xfbff;", st(0).c_str(), st(0).c_str(), st(1).c_str(), f.c_str()));
+        if (mn == "fscale") return emit(fmt("x87::fscale(%s);", f.c_str()));
+        if (mn == "fxch") return emit(fmt("{ double t_ = %s; %s = %s; %s = t_; }", st(0).c_str(), st(0).c_str(), st(in.nops ? a.st : 1).c_str(), st(in.nops ? a.st : 1).c_str()));
+        if (mn == "fucomi" || mn == "fcomi" || mn == "fucomip" || mn == "fcomip") {
+            emit(fmt("x87::fcomi(%s, %s, fl);", st(0).c_str(), st(b.st).c_str()));
+            if (mn.back() == 'p') pop();
+            return;
+        }
+        if (mn == "fucom" || mn == "fcom" || mn == "fucomp" || mn == "fcomp" || mn == "fucompp" || mn == "fcompp") {
+            // fucom st(i) may be decoded with the implicit st(0) as a visible first operand
+            const std::string rhs = in.nops == 0 ? st(1) : in.nops == 2 && is_st(b) ? st(b.st) : is_st(a) ? st(a.st) : ldm(a);
+            emit(fmt("x87::compare(%s, %s, %s);", f.c_str(), st(0).c_str(), rhs.c_str()));
+            if (mn.back() == 'p') pop();
+            if (mn == "fucompp" || mn == "fcompp") pop();
+            return;
+        }
+        if (mn == "ftst") return emit(fmt("x87::compare(%s, %s, 0.0);", f.c_str(), st(0).c_str()));
+        if (mn.compare(0, 5, "fcmov") == 0) {
+            const std::string cc = mn.substr(5);
+            static const struct { const char* n; const char* e; } m[] = {{"b", "cc_b"}, {"e", "cc_z"}, {"be", "cc_be"}, {"u", "cc_p"},
+                                                                         {"nb", "cc_nb"}, {"ne", "cc_nz"}, {"nbe", "cc_nbe"}, {"nu", "cc_np"}};
+            for (const auto& k : m)
+                if (cc == k.n) return emit(fmt("if (%s(fl)) %s = %s;", k.e, st(0).c_str(), st(b.st).c_str()));
+        }
+        if (mn == "fnstsw") {
+            if (is_st(a) || a.kind == OpKind::Mem) {
+                if (a.kind == OpKind::Mem) return emit(fmt("st<u16>(%s, x87::status(%s));", addr(a).c_str(), f.c_str()));
+            }
+            return emit(write(a, fmt("x87::status(%s)", f.c_str())));  // ax
+        }
+        if (mn == "fnstcw") return emit(fmt("st<u16>(%s, %s.cw);", addr(a).c_str(), f.c_str()));
+        if (mn == "fldcw") return emit(fmt("%s.cw = ld<u16>(%s);", f.c_str(), addr(a).c_str()));
+        if (mn == "fnstenv") return emit(fmt("x87::fnstenv(%s, %s);", f.c_str(), addr(a).c_str()));
+        if (mn == "fldenv") return emit(fmt("x87::fldenv(%s, %s);", f.c_str(), addr(a).c_str()));
+        unsupported(in);
+    }
+
     // String instructions with and without rep. The direction flag is treated as always clear (cld is a no-op, std unsupported).
     bool string_insn(const Insn& in) {
         const std::string& mn = in.mnemonic;
@@ -635,6 +737,7 @@ struct Lifter {
         }
 
         if (mn == "nop") return;
+        if (mn.size() > 1 && mn[0] == 'f' && mn != "fs") return x87_insn(in);
         if (!supported_operands(in)) return;
         for (int i = 0; i < in.nops; ++i)
             if (is_vec(in.ops[i])) return vector_insn(in);

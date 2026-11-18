@@ -86,6 +86,21 @@ static void test_rep_prefix_kind() {
     CHECK(decode(stos, sizeof stos, 0, i) && i.rep_kind == 1 && i.mnemonic == "stosq");
 }
 
+static void test_x87_operands() {
+    Insn i;
+    const uint8_t fadd[] = {0xd8, 0xc3};  // fadd st0, st3
+    CHECK(decode(fadd, sizeof fadd, 0, i) && i.mnemonic == "fadd" && i.nops == 2 && i.ops[0].st == 0 && i.ops[1].st == 3);
+    CHECK(i.ops[0].reg == kNoReg && i.ops[0].vec == kNoReg);
+    const uint8_t faddp[] = {0xde, 0xc1};  // faddp st1, st0
+    CHECK(decode(faddp, sizeof faddp, 0, i) && i.mnemonic == "faddp" && i.ops[0].st == 1 && i.ops[1].st == 0);
+    const uint8_t fld[] = {0xdd, 0x00};    // fld qword ptr [rax]
+    CHECK(decode(fld, sizeof fld, 0, i) && i.mnemonic == "fld" && i.ops[0].kind == OpKind::Mem && i.ops[0].bits == 64 && i.ops[0].st == kNoReg);
+    const uint8_t fld80[] = {0xdb, 0x28};  // fld tbyte ptr [rax]
+    CHECK(decode(fld80, sizeof fld80, 0, i) && i.ops[0].bits == 80);
+    const uint8_t mov[] = {0x48, 0x89, 0xd8};
+    CHECK(decode(mov, sizeof mov, 0, i) && i.ops[0].st == kNoReg);
+}
+
 static void test_jump_table() {
     // switch (edi) { case 0: return 1; case 1: return 2; case 2: return 3; default: return 0; } as compilers emit it:
     // cmp edi,2; ja default; lea rcx,[rip+table]; movsxd rax,[rcx+rdi*4]; add rax,rcx; jmp rax
@@ -237,6 +252,7 @@ int main() {
     test_cfg();
     test_byte_registers();
     test_rep_prefix_kind();
+    test_x87_operands();
     test_jump_table();
     test_hoisted_table_base();
     test_declarations();
