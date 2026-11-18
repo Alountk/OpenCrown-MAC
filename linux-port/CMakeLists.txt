@@ -231,3 +231,24 @@ add_test(NAME texwatch COMMAND test_texwatch)
 add_executable(test_update tests/test_update.cpp)  # launcher self-updater: logic + HTTP client on loopback only
 target_link_libraries(test_update PRIVATE dcp_net)
 add_test(NAME update COMMAND test_update)
+
+# Static recompiler (host tool, runs on the user's machine against their own dump; see ../odd/tasks/arm64-static-recomp.md).
+# Independent of the target architecture: it only decodes x86-64 bytes.
+option(DCP_RECOMP "Build the static recompiler" ON)
+if(DCP_RECOMP)
+  FetchContent_Declare(zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG v4.1.0
+    GIT_SHALLOW TRUE)
+  set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(zydis)
+  add_library(dcp_recomp STATIC recomp/src/decoder.cpp recomp/src/cfg.cpp)
+  target_include_directories(dcp_recomp PUBLIC recomp/src)
+  target_link_libraries(dcp_recomp PUBLIC Zydis)
+  add_executable(test_recomp recomp/tests/test_recomp.cpp)
+  target_link_libraries(test_recomp PRIVATE dcp_recomp)
+  add_test(NAME recomp COMMAND test_recomp)
+endif()
