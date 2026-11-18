@@ -83,6 +83,11 @@ static void test_declarations() {
     CHECK(d.find("extern \"C\" void f_1000(Ctx*);\n") != std::string::npos);
     CHECK(d.find("extern \"C\" void f_20f0(Ctx*);\n") != std::string::npos);
     CHECK(lift_declarations({}).empty());
+    // The function table is sorted (std::set), registers itself, and survives an empty program.
+    const std::string t = lift_function_table({0x20f0, 0x1000});
+    CHECK(t.find("{0x1000u, f_1000},\n  {0x20f0u, f_20f0}") != std::string::npos);
+    CHECK(t.find("set_function_table(kFunctions, 2)") != std::string::npos);
+    CHECK(lift_function_table({}).find("set_function_table(kFunctions, 0)") != std::string::npos);
 }
 
 static void test_cfg() {
