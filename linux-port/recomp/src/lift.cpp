@@ -180,6 +180,49 @@ struct Lifter {
             if (mn == b.mn && in.nops == 3)
                 return vset(d, fmt("%s(%s, %s)", b.fn, vread(s).c_str(), vread(in.ops[2]).c_str()));
 
+
+        // scalar float: ss = float / u32, sd = double / u64
+        if (mn.size() > 3 && (mn.compare(mn.size() - 2, 2, "ss") == 0 || mn.compare(mn.size() - 2, 2, "sd") == 0)) {
+            const bool dbl = mn.back() == 'd';
+            const char* F = dbl ? "double" : "float";
+            const char* U = dbl ? "u64" : "u32";
+            const std::string base = mn.substr(1, mn.size() - 3);  // "vaddss" -> "add"
+            auto elem = [&](const Operand& o, const char* u) {
+                return is_vec(o) ? fmt("vlo<%s>(x[%d])", u, o.vec) : fmt("ld<%s>(%s)", u, addr(o).c_str());
+            };
+            static const char* arith[] = {"add", "sub", "mul", "div", "min", "max"};
+            for (const char* a : arith)
+                if (base == a && in.nops == 3 && is_vec(s))
+                    return vset(d, fmt("vins<%s>(x[%d], f%s<%s>(vlo<%s>(x[%d]), %s))", U, s.vec, a, F, U, s.vec,
+                                       elem(in.ops[2], U).c_str()));
+            if (base == "sqrt" && in.nops == 3)
+                return vset(d, fmt("vins<%s>(x[%d], fsqrt<%s>(%s))", U, s.vec, F, elem(in.ops[2], U).c_str()));
+            if ((base == "ucomi" || base == "comi") && in.nops == 2)
+                return emit(fmt("fucomi<%s>(vlo<%s>(x[%d]), %s, fl);", F, U, d.vec, elem(s, U).c_str()));
+            if (base == "cmp" && in.nops == 4)
+                return vset(d, fmt("vins<%s>(x[%d], fcmp<%s>(vlo<%s>(x[%d]), %s, %uu))", U, s.vec, F, U, s.vec,
+                                   elem(in.ops[2], U).c_str(), unsigned(in.ops[3].imm) & 15u));
+            if (base == "cvtsi2" && in.nops == 3) {
+                const char* I = in.ops[2].bits == 64 ? "i64" : "i32";
+                return vset(d, fmt("vins<%s>(x[%d], fcvti<%s, %s>((%s)%s))", U, s.vec, F, I, I, read(in.ops[2]).c_str()));
+            }
+        }
+        if ((mn == "vcvttss2si" || mn == "vcvttsd2si") && in.nops == 2) {
+            const bool dbl = mn == "vcvttsd2si";
+            const char* I = d.bits == 64 ? "i64" : "i32";
+            return emit(write(d, fmt("fcvtt<%s, %s>(%s)", dbl ? "double" : "float", I,
+                                     is_vec(s) ? fmt("vlo<%s>(x[%d])", dbl ? "u64" : "u32", s.vec).c_str()
+                                               : fmt("ld<%s>(%s)", dbl ? "u64" : "u32", addr(s).c_str()).c_str())));
+        }
+        if (mn == "vcvtss2sd" && in.nops == 3)
+            return vset(d, fmt("vins<u64>(x[%d], fcvt_f2d(%s))", s.vec,
+                               is_vec(in.ops[2]) ? fmt("vlo<u32>(x[%d])", in.ops[2].vec).c_str()
+                                                 : fmt("ld<u32>(%s)", addr(in.ops[2]).c_str()).c_str()));
+        if (mn == "vcvtsd2ss" && in.nops == 3)
+            return vset(d, fmt("vins<u32>(x[%d], fcvt_d2f(%s))", s.vec,
+                               is_vec(in.ops[2]) ? fmt("vlo<u64>(x[%d])", in.ops[2].vec).c_str()
+                                                 : fmt("ld<u64>(%s)", addr(in.ops[2]).c_str()).c_str()));
+
         unsupported(in);
     }
 
@@ -216,6 +259,7 @@ struct Lifter {
         if (!supported_operands(in)) return;
         for (int i = 0; i < in.nops; ++i)
             if (is_vec(in.ops[i])) return vector_insn(in);
+        if (mn == "vcvttss2si" || mn == "vcvttsd2si") return vector_insn(in);  // GPR destination, memory source
         const Operand& d = in.ops[0];
         const Operand& s = in.ops[1];
         const int N = d.bits;

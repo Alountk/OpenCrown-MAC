@@ -2,6 +2,7 @@
 // Generated functions include this header. Everything here is header-only so the C++ compiler can inline it and
 // delete the flags nobody reads (that is what makes the flags "lazy": they are plain locals).
 #pragma once
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -368,5 +369,100 @@ inline Vec vxor(const Vec& a, const Vec& b) { return Vec{{a.q[0] ^ b.q[0], a.q[1
 inline Vec vand(const Vec& a, const Vec& b) { return Vec{{a.q[0] & b.q[0], a.q[1] & b.q[1], a.q[2] & b.q[2], a.q[3] & b.q[3]}}; }
 inline Vec vor(const Vec& a, const Vec& b) { return Vec{{a.q[0] | b.q[0], a.q[1] | b.q[1], a.q[2] | b.q[2], a.q[3] | b.q[3]}}; }
 inline Vec vandn(const Vec& a, const Vec& b) { return Vec{{~a.q[0] & b.q[0], ~a.q[1] & b.q[1], ~a.q[2] & b.q[2], ~a.q[3] & b.q[3]}}; }
+
+// ---- scalar floating point -------------------------------------------------------------------------------------
+// SSE rules that arm64 does not share, written out so the result is the same on both: a NaN result is the first NaN
+// operand made quiet, or the "default NaN" (negative quiet NaN) when no operand was NaN; min / max return the second
+// operand unless the comparison holds; conversions to integer return the "integer indefinite" value when out of range.
+// Operands and results travel as raw bits (u32 for float, u64 for double).
+
+template <class F> struct FT;
+template <> struct FT<float> {
+    using U = u32;
+    static constexpr U kQuiet = 0x00400000u, kDefaultNan = 0xffc00000u;
+};
+template <> struct FT<double> {
+    using U = u64;
+    static constexpr U kQuiet = 0x0008000000000000ull, kDefaultNan = 0xfff8000000000000ull;
+};
+template <class F> using FU = typename FT<F>::U;
+
+template <class F> inline F fbits(FU<F> u) {
+    F f;
+    std::memcpy(&f, &u, sizeof f);
+    return f;
+}
+template <class F> inline FU<F> fraw(F f) {
+    FU<F> u;
+    std::memcpy(&u, &f, sizeof u);
+    return u;
+}
+template <class F> inline FU<F> fnan_result(FU<F> a, FU<F> b) {
+    if (std::isnan(fbits<F>(a))) return a | FT<F>::kQuiet;
+    if (std::isnan(fbits<F>(b))) return b | FT<F>::kQuiet;
+    return FT<F>::kDefaultNan;
+}
+template <class F> inline FU<F> fresult(F r, FU<F> a, FU<F> b) { return std::isnan(r) ? fnan_result<F>(a, b) : fraw<F>(r); }
+
+template <class F> inline FU<F> fadd(FU<F> a, FU<F> b) { return fresult<F>(fbits<F>(a) + fbits<F>(b), a, b); }
+template <class F> inline FU<F> fsub(FU<F> a, FU<F> b) { return fresult<F>(fbits<F>(a) - fbits<F>(b), a, b); }
+template <class F> inline FU<F> fmul(FU<F> a, FU<F> b) { return fresult<F>(fbits<F>(a) * fbits<F>(b), a, b); }
+template <class F> inline FU<F> fdiv(FU<F> a, FU<F> b) { return fresult<F>(fbits<F>(a) / fbits<F>(b), a, b); }
+template <class F> inline FU<F> fmin(FU<F> a, FU<F> b) { return fbits<F>(a) < fbits<F>(b) ? a : b; }
+template <class F> inline FU<F> fmax(FU<F> a, FU<F> b) { return fbits<F>(a) > fbits<F>(b) ? a : b; }
+template <class F> inline FU<F> fsqrt(FU<F> b) { return fresult<F>(std::sqrt(fbits<F>(b)), b, b); }
+
+// ucomiss / comiss: unordered sets ZF PF CF; OF SF AF are always cleared.
+template <class F> inline void fucomi(FU<F> a, FU<F> b, Flags& f) {
+    const F x = fbits<F>(a), y = fbits<F>(b);
+    f.of = f.sf = f.af = false;
+    if (std::isnan(x) || std::isnan(y)) return f.zf = f.pf = f.cf = true, void();
+    f.pf = false;
+    f.zf = x == y;
+    f.cf = x < y;
+}
+
+// cmpss / cmpsd with the 16 distinct predicates (imm bit 4 only changes exception behaviour). All ones when true.
+template <class F> inline FU<F> fcmp(FU<F> a, FU<F> b, unsigned pred) {
+    const F x = fbits<F>(a), y = fbits<F>(b);
+    const bool u = std::isnan(x) || std::isnan(y);
+    bool t = false;
+    switch (pred & 15) {
+    case 0: t = !u && x == y; break;
+    case 1: t = !u && x < y; break;
+    case 2: t = !u && x <= y; break;
+    case 3: t = u; break;
+    case 4: t = u || x != y; break;
+    case 5: t = u || !(x < y); break;
+    case 6: t = u || !(x <= y); break;
+    case 7: t = !u; break;
+    case 8: t = u || x == y; break;
+    case 9: t = u || !(x >= y); break;
+    case 10: t = u || !(x > y); break;
+    case 11: t = false; break;
+    case 12: t = !u && x != y; break;
+    case 13: t = !u && x >= y; break;
+    case 14: t = !u && x > y; break;
+    default: t = true; break;
+    }
+    return t ? ~FU<F>(0) : FU<F>(0);
+}
+
+// Integer -> float (round to nearest even) and float -> integer by truncation (cvttss2si / cvttsd2si).
+template <class F, class I> inline FU<F> fcvti(I v) { return fraw<F>(F(v)); }
+template <class F, class I> inline I fcvtt(FU<F> a) {
+    const F x = fbits<F>(a);
+    const F hi = F(2) * F(I(1) << (bits_of<I> - 2));  // 2^(n-1), exact in float and double
+    if (!(x >= -hi && x < hi)) return std::numeric_limits<I>::min();  // NaN too: the "integer indefinite"
+    return I(x);
+}
+inline u64 fcvt_f2d(u32 a) {
+    if (std::isnan(fbits<float>(a))) return u64(a & 0x80000000u) << 32 | 0x7ff8000000000000ull | u64(a & 0x7fffffu) << 29;
+    return fraw<double>(double(fbits<float>(a)));
+}
+inline u32 fcvt_d2f(u64 a) {
+    if (std::isnan(fbits<double>(a))) return (u32(a >> 32) & 0x80000000u) | 0x7fc00000u | u32((a & 0xfffffffffffffull) >> 29);
+    return fraw<float>(float(fbits<double>(a)));
+}
 
 }  // namespace dcp::rt

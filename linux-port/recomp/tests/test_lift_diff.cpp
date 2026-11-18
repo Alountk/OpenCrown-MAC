@@ -243,6 +243,39 @@ const Case kCases[] = {
     {"vandnpd xmm0, xmm1, xmm2", 0}, {"vorpd xmm0, xmm1, xmm2", 0},
     {"vpxor xmm0, xmm1, xmm2", 0}, {"vpxor xmm0, xmm0, xmm0", 0}, {"vpand xmm0, xmm1, xmmword ptr [rbx+16]", 0},
     {"vpandn xmm0, xmm1, xmm2", 0}, {"vpor xmm0, xmm1, xmm2", 0}, {"vpxor xmm13, xmm14, xmm15", 0},
+    // ---- scalar float arithmetic: low element computed, bits 127:32 (63:0 for sd) kept from src1, 255:128 cleared ----
+    {"vaddss xmm0, xmm1, xmm2", 0}, {"vaddss xmm0, xmm0, xmm0", 0}, {"vaddss xmm3, xmm4, dword ptr [rbx+4]", 0},
+    {"vaddss xmm12, xmm9, xmm15", 0}, {"vsubss xmm0, xmm1, xmm2", 0}, {"vsubss xmm3, xmm4, dword ptr [rbx+8]", 0},
+    {"vmulss xmm0, xmm1, xmm2", 0}, {"vmulss xmm3, xmm4, dword ptr [rbx+12]", 0}, {"vdivss xmm0, xmm1, xmm2", 0},
+    {"vdivss xmm3, xmm4, dword ptr [rbx+16]", 0}, {"vminss xmm0, xmm1, xmm2", 0}, {"vminss xmm3, xmm4, dword ptr [rbx]", 0},
+    {"vmaxss xmm0, xmm1, xmm2", 0}, {"vmaxss xmm3, xmm4, dword ptr [rbx]", 0}, {"vsqrtss xmm0, xmm1, xmm2", 0},
+    {"vsqrtss xmm3, xmm4, dword ptr [rbx+4]", 0},
+    {"vaddsd xmm0, xmm1, xmm2", 0}, {"vaddsd xmm3, xmm4, qword ptr [rbx+8]", 0}, {"vsubsd xmm0, xmm1, xmm2", 0},
+    {"vmulsd xmm0, xmm1, xmm2", 0}, {"vmulsd xmm3, xmm4, qword ptr [rbx+16]", 0}, {"vdivsd xmm0, xmm1, xmm2", 0},
+    {"vminsd xmm0, xmm1, xmm2", 0}, {"vmaxsd xmm0, xmm1, xmm2", 0}, {"vsqrtsd xmm0, xmm1, xmm2", 0},
+    {"vsqrtsd xmm3, xmm4, qword ptr [rbx]", 0},
+    // ---- comparisons: ucomiss / comiss set ZF PF CF and clear OF SF AF ----
+    {"vucomiss xmm0, xmm1", ALL}, {"vucomiss xmm0, dword ptr [rbx+4]", ALL}, {"vucomiss xmm9, xmm15", ALL},
+    {"vcomiss xmm0, xmm1", ALL}, {"vcomiss xmm2, dword ptr [rbx]", ALL}, {"vucomisd xmm0, xmm1", ALL},
+    {"vucomisd xmm0, qword ptr [rbx+8]", ALL}, {"vcomisd xmm0, xmm1", ALL},
+    {"vucomiss xmm0, xmm1\nsetp al\nseta cl\nsetb dl", ALL}, {"vucomiss xmm0, xmm1\njp 1f\nmov rcx, 1\n1: nop", ALL},
+    {"vcmpss xmm0, xmm1, xmm2, 0", 0}, {"vcmpss xmm0, xmm1, xmm2, 1", 0}, {"vcmpss xmm0, xmm1, xmm2, 2", 0},
+    {"vcmpss xmm0, xmm1, xmm2, 3", 0}, {"vcmpss xmm0, xmm1, xmm2, 4", 0}, {"vcmpss xmm0, xmm1, xmm2, 5", 0},
+    {"vcmpss xmm0, xmm1, xmm2, 6", 0}, {"vcmpss xmm0, xmm1, xmm2, 7", 0}, {"vcmpss xmm0, xmm1, xmm2, 8", 0},
+    {"vcmpss xmm0, xmm1, xmm2, 9", 0}, {"vcmpss xmm0, xmm1, xmm2, 10", 0}, {"vcmpss xmm0, xmm1, xmm2, 11", 0},
+    {"vcmpss xmm0, xmm1, xmm2, 12", 0}, {"vcmpss xmm0, xmm1, xmm2, 13", 0}, {"vcmpss xmm0, xmm1, xmm2, 14", 0},
+    {"vcmpss xmm0, xmm1, xmm2, 15", 0}, {"vcmpss xmm0, xmm1, xmm2, 17", 0}, {"vcmpss xmm0, xmm1, dword ptr [rbx], 1", 0},
+    {"vcmpsd xmm0, xmm1, xmm2, 0", 0}, {"vcmpsd xmm0, xmm1, xmm2, 1", 0}, {"vcmpsd xmm0, xmm1, xmm2, 3", 0},
+    {"vcmpsd xmm0, xmm1, xmm2, 4", 0}, {"vcmpsd xmm0, xmm1, xmm2, 13", 0}, {"vcmpsd xmm0, xmm1, qword ptr [rbx], 2", 0},
+    // ---- conversions ----
+    {"vcvtsi2ss xmm0, xmm1, eax", 0}, {"vcvtsi2ss xmm0, xmm1, rax", 0}, {"vcvtsi2ss xmm0, xmm1, dword ptr [rbx]", 0},
+    {"vcvtsi2ss xmm0, xmm1, qword ptr [rbx+8]", 0}, {"vcvtsi2sd xmm0, xmm1, eax", 0}, {"vcvtsi2sd xmm0, xmm1, rax", 0},
+    {"vcvtsi2sd xmm0, xmm1, dword ptr [rbx]", 0}, {"vcvtsi2ss xmm9, xmm9, r10d", 0},
+    {"vcvttss2si eax, xmm1", 0}, {"vcvttss2si rax, xmm1", 0}, {"vcvttss2si eax, dword ptr [rbx+4]", 0},
+    {"vcvttss2si rax, dword ptr [rbx+4]", 0}, {"vcvttsd2si eax, xmm1", 0}, {"vcvttsd2si rax, xmm1", 0},
+    {"vcvttsd2si eax, qword ptr [rbx+8]", 0}, {"vcvttsd2si r9, xmm12", 0},
+    {"vcvtss2sd xmm0, xmm1, xmm2", 0}, {"vcvtss2sd xmm0, xmm1, dword ptr [rbx]", 0}, {"vcvtsd2ss xmm0, xmm1, xmm2", 0},
+    {"vcvtsd2ss xmm0, xmm1, qword ptr [rbx+8]", 0},
     // a counted loop (1..8 iterations: ecx is made non-zero first, otherwise dec wraps and it runs 2^32 times)
     {"and ecx, 7\ninc ecx\nxor eax, eax\n1: add rax, rcx\ndec ecx\njnz 1b", ALL},
     // flags set by one instruction and consumed several instructions later
@@ -262,6 +295,27 @@ uint64_t rand_value() {
     case 0: return edge[rnd() % (sizeof edge / sizeof edge[0])];
     case 1: return rnd() & 0xff;
     case 2: return rnd() & 0xffffffffull;
+    default: return rnd();
+    }
+}
+
+// A 64-bit vector lane: integer edge values, two packed float specials, a double special, or random bits. The specials are
+// zeros, infinities, quiet and signalling NaNs, denormals and the int32 / int64 conversion boundaries.
+uint64_t rand_lane() {
+    static const uint32_t f32[] = {0x00000000, 0x80000000, 0x3f800000, 0xbf800000, 0x7f800000, 0xff800000, 0x7fc00000,
+                                   0x7f800001, 0xffc00000, 0x7fc00123, 0x00000001, 0x007fffff, 0x7f7fffff, 0x4f000000,
+                                   0xcf000000, 0x5f000000, 0xdf000000, 0x3f000000, 0x40000000, 0x40490fdb, 0xc0a00000,
+                                   0x42c80000, 0x4effffff, 0xff7fffff, 0x80000001};
+    static const uint64_t f64[] = {0, 0x8000000000000000ull, 0x3ff0000000000000ull, 0xbff0000000000000ull,
+                                   0x7ff0000000000000ull, 0xfff0000000000000ull, 0x7ff8000000000000ull, 0x7ff0000000000001ull,
+                                   0xfff8000000000000ull, 0x7ff8000000000123ull, 1, 0x000fffffffffffffull, 0x7fefffffffffffffull,
+                                   0x41e0000000000000ull, 0xc1e0000000000000ull, 0x43e0000000000000ull, 0xc3e0000000000000ull,
+                                   0x41dfffffffc00000ull, 0x4008000000000000ull, 0xc014000000000000ull, 0x4059000000000000ull};
+    constexpr size_t n32 = sizeof f32 / sizeof f32[0], n64 = sizeof f64 / sizeof f64[0];
+    switch (rnd() % 4) {
+    case 0: return rand_value();
+    case 1: return uint64_t(f32[rnd() % n32]) << 32 | f32[rnd() % n32];
+    case 2: return f64[rnd() % n64];
     default: return rnd();
     }
 }
@@ -380,7 +434,7 @@ int main() {
             Ctx in{};
             for (auto& r : in.r) r = rand_value();
             for (auto& v : in.x)
-                for (auto& q : v.q) q = rand_value();
+                for (auto& q : v.q) q = rand_lane();
             in.r[dcp::rt::RBX] = ptr;
             in.r[dcp::rt::RSP] = sp;
             in.rflags = 2 | (rnd() & (CF | PF | AF | ZF | SF | OF));
