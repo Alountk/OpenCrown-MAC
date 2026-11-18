@@ -3,8 +3,10 @@
 #pragma once
 
 #ifdef __APPLE__
-#if !defined(__x86_64__)
-#error "The macOS port runs the PS4's x86-64 code directly: build with -DCMAKE_OSX_ARCHITECTURES=x86_64 (Rosetta 2 on Apple Silicon)"
+// Two ways to run on a Mac: the x86-64 build runs the PS4's code directly (Rosetta 2 on Apple Silicon); the arm64 build runs
+// code recompiled from it and must say so with DCP_RECOMPILED (see odd/tasks/arm64-static-recomp.md).
+#if !defined(__x86_64__) && !defined(DCP_RECOMPILED)
+#error "Build with -DCMAKE_OSX_ARCHITECTURES=x86_64 (Rosetta 2), or for arm64 with -DDCP_RECOMPILED=ON (recompiled game code)"
 #endif
 
 #include <cstddef>
@@ -62,6 +64,7 @@ inline bool safe_write(uint64_t addr, const void* in, size_t n) {
            KERN_SUCCESS;
 }
 
+#if defined(__x86_64__)
 // Signal-handler register access with the Linux REG_* names, so fault handlers read the same on both systems.
 enum Reg { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RDI, REG_RSI, REG_RBP, REG_RSP, REG_R8, REG_R9, REG_R10, REG_R11,
            REG_R12, REG_R13, REG_R14, REG_R15, REG_RIP, REG_EFL, REG_ERR };
@@ -106,6 +109,9 @@ using dcp::platform::GRegs;
 using enum dcp::platform::Reg;
 using dcp::platform::Reg;
 using greg_t = uint64_t;
+#else
+}  // namespace dcp::platform
+#endif  // x86_64: the arm64 build has no x86 register state to show; code that reads it is compiled out
 
 #else  // Linux
 

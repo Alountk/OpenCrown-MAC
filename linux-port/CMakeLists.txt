@@ -17,6 +17,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
+# arm64: the platform layer runs recompiled game code instead of the PS4's x86-64 code (see odd/tasks/arm64-static-recomp.md).
+option(DCP_RECOMPILED "Run recompiled game code (arm64 macOS)" OFF)
+if(DCP_RECOMPILED)
+  add_compile_definitions(DCP_RECOMPILED=1)
+endif()
 add_compile_options(-Wall -Wextra)
 if(APPLE)
   # ucontext.h needs _XOPEN_SOURCE on macOS; _DARWIN_C_SOURCE keeps the BSD/Mach extras visible.
@@ -66,7 +71,12 @@ foreach(tool dcp_cpk dcp_tex dcp_audio dcp_sprite)
 endforeach()
 
 # Loader: maps the user's eboot into this process, relocates, binds imports to shims / module exports / stubs.
-add_library(dcp_loader STATIC src/loader/nid.cpp src/loader/elf.cpp src/loader/hle.cpp src/loader/cpu_compat.cpp)
+add_library(dcp_loader STATIC src/loader/nid.cpp src/loader/elf.cpp src/loader/hle.cpp)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86" OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+  target_sources(dcp_loader PRIVATE src/loader/cpu_compat.cpp)  # x86-only: replaces MOVBE / BMI1 / LZCNT with older instructions
+else()
+  target_link_libraries(dcp_loader PUBLIC dcp_rt)  # arm64: imports are dispatched by the recompiled-code runtime
+endif()
 target_include_directories(dcp_loader PUBLIC src)
 
 include(FetchContent)

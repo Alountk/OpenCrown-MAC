@@ -10,6 +10,9 @@
 #include <sys/mman.h>
 
 #include "nid.h"
+#ifndef __x86_64__
+#include "dcp_dispatch.h"  // recompiled build: an import the guest calls by address is dispatched by the recompiled-code runtime
+#endif
 
 namespace dcp::loader {
 namespace {
@@ -70,6 +73,7 @@ __attribute__((noinline)) uint64_t unimpl_impl(uint64_t a, uint64_t b, uint64_t 
     return 0;
 }
 
+#ifdef __x86_64__
 }  // namespace
 }  // namespace dcp::loader
 
@@ -99,6 +103,24 @@ asm("    .text\n"
     "    ret\n");
 
 
+#else
+// No machine code to emit on arm64: a stub is just a unique address inside the stub page. The guest calls it by address; the
+// dispatcher finds no recompiled function there and hands it to this handler, which logs the call like the x86 trampoline.
+void foreign_import(dcp::rt::Ctx* c, uint64_t target) {
+    const uint64_t base = reinterpret_cast<uint64_t>(g_stub_page);
+    if (g_stub_page && target >= base && target < base + g_nstubs * kThunkSize) {
+        using namespace dcp::rt;
+        c->r[RAX] = unimpl_impl(c->r[RDI], c->r[RSI], c->r[RDX], c->r[RCX], c->r[R8], c->r[R9], uint32_t((target - base) / kThunkSize));
+        c->r[RSP] += 8;  // the callee's ret
+        return;
+    }
+    std::fprintf(stderr, "dcp: call to 0x%llx, which is neither recompiled code nor an import\n", (unsigned long long)target);
+    std::abort();
+}
+}  // namespace
+}  // namespace dcp::loader
+#endif
+
 namespace dcp::loader {
 namespace {
 
@@ -111,11 +133,15 @@ uint64_t make_stub(const std::string& display) {
     if (g_nstubs == kMaxStubs) throw std::runtime_error("hle: too many stubs");
     uint32_t idx = uint32_t(g_nstubs++);
     uint8_t* t = g_stub_page + idx * kThunkSize;
+#ifdef __x86_64__
     uint64_t ph = reinterpret_cast<uint64_t>(&dcp_unimpl_tramp);
     std::memset(t, 0xCC, kThunkSize);
     t[0] = 0xB8, std::memcpy(t + 1, &idx, 4);                 // mov eax, idx
     t[5] = 0x49, t[6] = 0xBB, std::memcpy(t + 7, &ph, 8);     // movabs r11, dcp_unimpl_tramp
     t[15] = 0x41, t[16] = 0xFF, t[17] = 0xE3;                 // jmp r11
+#else
+    dcp::rt::set_foreign_handler(foreign_import);
+#endif
     g_stub_names.push_back(display);
     g_stub_logged.push_back(false);
     return reinterpret_cast<uint64_t>(t);
@@ -170,7 +196,9 @@ uint64_t Binder::resolve_new(const Symbol& s) {
 }
 
 void Binder::finalize() {
+#ifdef __x86_64__
     if (g_stub_page) mprotect(g_stub_page, kThunkSize * kMaxStubs, PROT_READ | PROT_EXEC);
+#endif  // arm64: the page is only a range of addresses, never executed
 }
 
 std::vector<std::string> recent_unimpl_calls() {
