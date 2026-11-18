@@ -762,4 +762,36 @@ template <class U> inline Vec vpins(const Vec& a, U e, unsigned idx) {
     return r;
 }
 
+// ---- reciprocal estimates ---------------------------------------------------------------------------------------
+// rcpps / rsqrtps are approximations (relative error up to 1.5 * 2^-12) whose exact bits depend on the CPU model, so no
+// bit-exact answer exists to reproduce. These return the correctly rounded value instead (always inside the architectural
+// bound) and follow the defined special cases: zero and denormal inputs give a signed infinity, results below the
+// smallest normal number flush to a signed zero, negative inputs to rsqrt give the default NaN.
+inline u32 frcp(u32 a) {
+    const float x = fbits<float>(a);
+    if (std::isnan(x)) return a | FT<float>::kQuiet;
+    const u32 sign = a & 0x80000000u;
+    if (std::fabs(x) < std::numeric_limits<float>::min()) return sign | 0x7f800000u;  // zero or denormal
+    const float r = 1.0f / x;
+    return std::fabs(r) < std::numeric_limits<float>::min() ? sign : fraw<float>(r);
+}
+inline u32 frsqrt(u32 a) {
+    const float x = fbits<float>(a);
+    if (std::isnan(x)) return a | FT<float>::kQuiet;
+    if (std::fabs(x) < std::numeric_limits<float>::min()) return (a & 0x80000000u) | 0x7f800000u;
+    if (x < 0) return FT<float>::kDefaultNan;
+    const float r = 1.0f / std::sqrt(x);
+    return std::fabs(r) < std::numeric_limits<float>::min() ? 0u : fraw<float>(r);
+}
+template <int B> inline Vec vprcp(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<u32>(r, i, frcp(lane<u32>(a, i)));
+    return r;
+}
+template <int B> inline Vec vprsqrt(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<u32>(r, i, frsqrt(lane<u32>(a, i)));
+    return r;
+}
+
 }  // namespace dcp::rt

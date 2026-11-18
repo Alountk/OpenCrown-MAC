@@ -345,6 +345,8 @@ struct Lifter {
             if (base == "cmp" && in.nops == 4)
                 return vset(d, fmt("vins<%s>(x[%d], fcmp<%s>(vlo<%s>(x[%d]), %s, %uu))", U, s.vec, F, U, s.vec,
                                    elem(in.ops[2], U).c_str(), unsigned(in.ops[3].imm) & 15u));
+            if ((base == "rcp" || base == "rsqrt") && in.nops == 3 && !dbl)
+                return vset(d, fmt("vins<u32>(x[%d], f%s(%s))", s.vec, base.c_str(), elem(in.ops[2], "u32").c_str()));
             if (base == "round" && in.nops == 4)
                 return vset(d, fmt("vins<%s>(x[%d], fround<%s>(%s, %uu))", U, s.vec, F, elem(in.ops[2], U).c_str(),
                                    unsigned(in.ops[3].imm) & 7u));
@@ -379,6 +381,8 @@ struct Lifter {
             for (const char* a : arith)
                 if (base == a && in.nops == 3)
                     return vset(d, fmt("vpf<%s, %d, f%s<%s>>(%s, %s)", F, B, a, F, vread(s).c_str(), vread(in.ops[2]).c_str()));
+            if ((base == "rcp" || base == "rsqrt") && in.nops == 2 && mn.back() == 's')
+                return vset(d, fmt("vp%s<%d>(%s)", base.c_str(), B, vread(s).c_str()));
             if (base == "sqrt" && in.nops == 2) return vset(d, fmt("vpsqrt<%s, %d>(%s)", F, B, vread(s).c_str()));
             if (base == "cmp" && in.nops == 4)
                 return vset(d, fmt("vpcmp<%s, %d>(%s, %s, %uu)", F, B, vread(s).c_str(), vread(in.ops[2]).c_str(),
