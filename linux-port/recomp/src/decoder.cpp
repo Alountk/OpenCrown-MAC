@@ -32,7 +32,9 @@ Flow classify(const ZydisDecodedInstruction& i) {
     default: break;
     }
     // ud2 is how the compiler marks unreachable code after a noreturn call; int3 is a breakpoint. Neither falls through.
-    if (i.mnemonic == ZYDIS_MNEMONIC_UD2 || i.mnemonic == ZYDIS_MNEMONIC_INT3) return Flow::Trap;
+    if (i.mnemonic == ZYDIS_MNEMONIC_UD2 || i.mnemonic == ZYDIS_MNEMONIC_INT3 || i.mnemonic == ZYDIS_MNEMONIC_INT ||
+        i.mnemonic == ZYDIS_MNEMONIC_HLT)
+        return Flow::Trap;
     return Flow::Normal;
 }
 
@@ -103,6 +105,7 @@ bool decode(const uint8_t* code, size_t avail, uint64_t addr, Insn& out) {
     }
     out.lock = ins.attributes & ZYDIS_ATTRIB_HAS_LOCK;
     out.rep = ins.attributes & (ZYDIS_ATTRIB_HAS_REP | ZYDIS_ATTRIB_HAS_REPE | ZYDIS_ATTRIB_HAS_REPNE);
+    out.rep_kind = (ins.attributes & ZYDIS_ATTRIB_HAS_REPNE) ? 2 : (ins.attributes & (ZYDIS_ATTRIB_HAS_REP | ZYDIS_ATTRIB_HAS_REPE)) ? 1 : 0;
     char buf[128];
     if (ZYAN_SUCCESS(ZydisFormatterFormatInstruction(&formatter(), &ins, ops, ins.operand_count_visible, buf,
                                                      sizeof buf, addr, nullptr)))

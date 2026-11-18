@@ -150,6 +150,36 @@ struct Lifter {
     }
     void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
 
+    // String instructions with and without rep. The direction flag is treated as always clear (cld is a no-op, std unsupported).
+    bool string_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        static const char* names[] = {"movs", "stos", "lods", "cmps", "scas"};
+        int kind = -1;
+        for (int k = 0; k < 5; ++k)
+            if (mn.size() == 5 && mn.compare(0, 4, names[k]) == 0) kind = k;
+        if (kind < 0) return false;
+        const char sz = mn[4];
+        if (sz != 'b' && sz != 'w' && sz != 'd' && sz != 'q') return false;
+        if (sz == 'd' && (kind == 0 || kind == 3) && in.nops >= 2 && (in.ops[0].kind == OpKind::Reg || in.ops[1].kind == OpKind::Reg))
+            return false;  // SSE movsd / cmpsd
+        const int n = sz == 'b' ? 1 : sz == 'w' ? 2 : sz == 'd' ? 4 : 8;
+        const char* T = ut(n * 8);
+        std::string step;
+        switch (kind) {
+        case 0: step = fmt("st<%s>(r[RDI], ld<%s>(r[RSI])); r[RSI] += %d; r[RDI] += %d;", T, T, n, n); break;
+        case 1: step = fmt("st<%s>(r[RDI], rd<%s>(r[RAX])); r[RDI] += %d;", T, T, n); break;
+        case 2: step = fmt("wr<%s>(r[RAX], ld<%s>(r[RSI])); r[RSI] += %d;", T, T, n); break;
+        case 3: step = fmt("(void)sub<%s>(ld<%s>(r[RSI]), ld<%s>(r[RDI]), fl); r[RSI] += %d; r[RDI] += %d;", T, T, T, n, n); break;
+        default: step = fmt("(void)sub<%s>(rd<%s>(r[RAX]), ld<%s>(r[RDI]), fl); r[RDI] += %d;", T, T, T, n); break;
+        }
+        if (!in.rep_kind) return emit("{ " + step + " }"), true;
+        // cmps / scas stop on the zero flag: repe while ZF = 1, repne while ZF = 0; the others just count rcx down
+        std::string stop;
+        if (kind >= 3) stop = in.rep_kind == 2 ? " if (fl.zf) break;" : " if (!fl.zf) break;";
+        emit("while (r[RCX] != 0) { " + step + " r[RCX] -= 1;" + stop + " }");
+        return true;
+    }
+
     // Atomic and exchange-like instructions: lock-prefixed read-modify-write on memory, xchg with memory (implicitly locked),
     // xadd, cmpxchg, cmpxchg16b, and bts / btr / btc. Returns false when `in` is none of them (or has nothing atomic about it).
     bool atomic_insn(const Insn& in) {
@@ -361,11 +391,70 @@ struct Lifter {
         return false;
     }
 
+    // Legacy (non-VEX) SSE: the same operation as the VEX form with the destination also as the first source, except that bits
+    // 255:128 of the destination register are left alone. Translated to the VEX instruction and the upper half restored.
+    void legacy_sse(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& d = in.ops[0];
+        // VEX forms that take (dest, src1, src2): the legacy form has dest == src1
+        static const char* dup[] = {"add", "sub", "mul", "div", "min", "max", "sqrt", "and", "andn", "or", "xor", "cmp", "unpckl",
+                                    "unpckh", "shuf", "cvtsi2", "cvtss2sd", "cvtsd2ss", "padd", "psub", "pcmpeq", "pcmpgt", "punpckl",
+                                    "punpckh", "pxor", "por", "pand", "pandn", "pmull", "pack"};
+        static const char* same[] = {"movaps", "movups", "movapd", "movupd", "movdqa", "movdqu", "ucomiss", "ucomisd", "comiss",
+                                     "comisd", "movd", "movq", "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si", "pshufd", "pshuflw",
+                                     "pshufhw", "movddup", "movshdup", "movsldup"};
+        bool shift = false, known = false;
+        for (const char* k : same) known |= mn == k;
+        for (const char* k : dup) {
+            const std::string p = k;
+            if (mn.compare(0, p.size(), p) == 0) {
+                known = shift = true;
+                // an arithmetic name must end in ss/sd/ps/pd (or be a packed-integer / conversion name)
+                const std::string rest = mn.substr(p.size());
+                if ((p == "add" || p == "sub" || p == "mul" || p == "div" || p == "min" || p == "max" || p == "sqrt" || p == "and" ||
+                     p == "andn" || p == "or" || p == "xor") &&
+                    rest != "ss" && rest != "sd" && rest != "ps" && rest != "pd")
+                    known = shift = false;
+            }
+        }
+        // cmpeqss, cmpltsd, ... are cmpss / cmpsd with the predicate in the name
+        static const char* preds[] = {"eq", "lt", "le", "unord", "neq", "nlt", "nle", "ord"};
+        Insn v = in;
+        if (mn.size() == 8 && mn.compare(0, 3, "cmp") == 0 && (mn.compare(6, 2, "ss") == 0 || mn.compare(6, 2, "sd") == 0 ||
+                                                                 mn.compare(6, 2, "ps") == 0 || mn.compare(6, 2, "pd") == 0)) {
+            // cmpeqps: 3 letters of predicate would not fit; handled by the length check below
+        }
+        for (int k = 0; k < 8; ++k) {
+            const std::string pr = std::string("cmp") + preds[k];
+            if (mn.size() == pr.size() + 2 && mn.compare(0, pr.size(), pr) == 0 && in.nops == 2) {
+                v.mnemonic = "cmp" + mn.substr(pr.size());
+                v.ops[2] = Operand{};
+                v.ops[2].kind = OpKind::Imm, v.ops[2].imm = k, v.ops[2].bits = 8;
+                v.nops = 3;
+                known = shift = true;
+                break;
+            }
+        }
+        if ((mn == "movss" || mn == "movsd") && in.nops == 2 && is_vec(in.ops[0]) && is_vec(in.ops[1])) known = shift = true;
+        else if (mn == "movss" || mn == "movsd") known = true;  // load / store forms
+        if (!known) return unsupported(in, "legacy SSE");
+        if (v.mnemonic == in.mnemonic) v.mnemonic = "v" + mn;
+        if (shift) {  // (dest, src, [imm]) -> (dest, dest, src, [imm])
+            for (int i = v.nops; i > 1; --i) v.ops[i] = v.ops[i - 1];
+            v.ops[1] = v.ops[0];
+            ++v.nops;
+        }
+        if (!is_vec(d)) return vector_insn(v);  // GPR or memory destination: no vector register to preserve
+        emit(fmt("{ const u64 hi0 = x[%d].q[2], hi1 = x[%d].q[3];", d.vec, d.vec));
+        vector_insn(v);
+        emit(fmt("x[%d].q[2] = hi0; x[%d].q[3] = hi1; }", d.vec, d.vec));
+    }
+
     void vector_insn(const Insn& in) {
         const std::string& mn = in.mnemonic;
         const Operand& d = in.ops[0];
         const Operand& s = in.ops[1];
-        if (!starts_with(mn, "v")) return unsupported(in, "legacy SSE");
+        if (!starts_with(mn, "v")) return legacy_sse(in);
 
         if (mn == "vmovups" || mn == "vmovaps" || mn == "vmovupd" || mn == "vmovapd" || mn == "vmovdqa" || mn == "vmovdqu" ||
             mn == "vlddqu") {
@@ -428,6 +517,13 @@ struct Lifter {
                 const char* I = in.ops[2].bits == 64 ? "i64" : "i32";
                 return vset(d, fmt("vins<%s>(x[%d], fcvti<%s, %s>((%s)%s))", U, s.vec, F, I, I, read(in.ops[2]).c_str()));
             }
+        }
+        if ((mn == "vcvtss2si" || mn == "vcvtsd2si") && in.nops == 2) {
+            const bool dbl = mn == "vcvtsd2si";
+            const char* I = d.bits == 64 ? "i64" : "i32";
+            return emit(write(d, fmt("fcvtn<%s, %s>(%s)", dbl ? "double" : "float", I,
+                                     is_vec(s) ? fmt("vlo<%s>(x[%d])", dbl ? "u64" : "u32", s.vec).c_str()
+                                               : fmt("ld<%s>(%s)", dbl ? "u64" : "u32", addr(s).c_str()).c_str())));
         }
         if ((mn == "vcvttss2si" || mn == "vcvttsd2si") && in.nops == 2) {
             const bool dbl = mn == "vcvttsd2si";
@@ -513,6 +609,20 @@ struct Lifter {
             if (in.direct && fn.blocks.count(in.target)) return emit("goto " + label(in.target) + ";");
             return tail_to(in);
         }
+        if (in.flow == Flow::CondJump && (mn == "loop" || mn == "loope" || mn == "loopne" || mn == "jrcxz")) {
+            if (!in.direct) return unsupported(in, "indirect");
+            std::string cond;
+            if (mn == "jrcxz") cond = "r[RCX] == 0";
+            else {
+                emit("r[RCX] -= 1;");
+                cond = mn == "loop" ? "r[RCX] != 0" : mn == "loope" ? "r[RCX] != 0 && fl.zf" : "r[RCX] != 0 && !fl.zf";
+            }
+            if (fn.blocks.count(in.target)) return emit(fmt("if (%s) goto %s;", cond.c_str(), label(in.target).c_str()));
+            emit(fmt("if (%s) {", cond.c_str()));
+            body += "  ";
+            tail_to(in);
+            return emit("}");
+        }
         if (in.flow == Flow::CondJump) {
             if (!in.direct) return unsupported(in, "indirect");
             const std::string c = cc_of(mn, 1);
@@ -528,7 +638,9 @@ struct Lifter {
         if (!supported_operands(in)) return;
         for (int i = 0; i < in.nops; ++i)
             if (is_vec(in.ops[i])) return vector_insn(in);
-        if (mn == "vcvttss2si" || mn == "vcvttsd2si") return vector_insn(in);  // GPR destination, memory source
+        if (mn == "vcvttss2si" || mn == "vcvttsd2si" || mn == "vcvtss2si" || mn == "vcvtsd2si" ||
+            mn == "cvttss2si" || mn == "cvttsd2si" || mn == "cvtss2si" || mn == "cvtsd2si")
+            return vector_insn(in);  // GPR destination, memory source
         const Operand& d = in.ops[0];
         const Operand& s = in.ops[1];
         const int N = d.bits;
@@ -549,6 +661,16 @@ struct Lifter {
             emit("{ u64 v = ld<u64>(r[RSP]); r[RSP] += 8; " + write(d, "v") + " }");
             return;
         }
+        if (string_insn(in)) return;
+        if (mn == "clc") return emit("fl.cf = false;");
+        if (mn == "stc") return emit("fl.cf = true;");
+        if (mn == "cmc") return emit("fl.cf = !fl.cf;");
+        if (mn == "cld" || mn == "pause" || mn == "ldmxcsr" || mn == "prefetcht0" || mn == "prefetcht1" || mn == "prefetcht2" ||
+            mn == "prefetchnta" || mn == "prefetchw" || mn == "prefetch")
+            return;  // no effect on guest-visible state (the rounding mode in mxcsr is not modelled)
+        if (mn == "mfence" || mn == "lfence" || mn == "sfence") return emit("__atomic_thread_fence(__ATOMIC_SEQ_CST);");
+        if (mn == "in" || mn == "out" || mn == "insb" || mn == "insw" || mn == "insd" || mn == "outsb" || mn == "outsw" || mn == "outsd")
+            return emit("__builtin_trap();  // privileged: never executed by a user program");
         if (atomic_insn(in)) return;
         if (mn == "xchg") {
             emit(fmt("{ %s a = %s, b = %s; %s %s }", ut(N), read(d).c_str(), read(s, N).c_str(), write(d, "b").c_str(),
@@ -614,6 +736,7 @@ struct Lifter {
             return emit(write(d, fmt("%s<%s>(%s, %s, fl)", mn.c_str(), ut(N), read(s, N).c_str(), read(d).c_str())));
         if (mn == "lzcnt" || mn == "tzcnt" || mn == "popcnt")
             return emit(write(d, fmt("%s<%s>(%s, fl)", mn.c_str(), ut(N), read(s, N).c_str())));
+        if (mn == "blsi" || mn == "blsr" || mn == "blsmsk") return emit(write(d, fmt("%s<%s>(%s, fl)", mn.c_str(), ut(N), read(s, N).c_str())));
         if (mn == "andn") return emit(write(d, fmt("andn<%s>(%s, %s, fl)", ut(N), read(s, N).c_str(), read(in.ops[2], N).c_str())));
         if (mn == "bextr") return emit(write(d, fmt("bextr<%s>(%s, %s, fl)", ut(N), read(s, N).c_str(), read(in.ops[2], N).c_str())));
 

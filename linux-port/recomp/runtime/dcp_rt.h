@@ -847,4 +847,30 @@ template <class T> inline T bit_set(T v, u64 n, Flags& f) { n %= bits_of<T>; f.c
 template <class T> inline T bit_reset(T v, u64 n, Flags& f) { n %= bits_of<T>; f.cf = (v >> n) & 1; return T(v & ~(T(1) << n)); }
 template <class T> inline T bit_flip(T v, u64 n, Flags& f) { n %= bits_of<T>; f.cf = (v >> n) & 1; return T(v ^ (T(1) << n)); }
 
+// BMI1: blsi (isolate lowest set bit), blsr (clear it), blsmsk (mask up to and including it). AF and PF are undefined.
+template <class T> inline T blsi(T v, Flags& f) {
+    const T r = T(v & T(T(0) - v));
+    f.cf = v != 0, f.zf = r == 0, f.sf = msb(r), f.of = false, f.af = false, f.pf = false;
+    return r;
+}
+template <class T> inline T blsr(T v, Flags& f) {
+    const T r = T(v & T(v - 1));
+    f.cf = v == 0, f.zf = r == 0, f.sf = msb(r), f.of = false, f.af = false, f.pf = false;
+    return r;
+}
+template <class T> inline T blsmsk(T v, Flags& f) {
+    const T r = T(v ^ T(v - 1));
+    f.cf = v == 0, f.zf = false, f.sf = msb(r), f.of = false, f.af = false, f.pf = false;
+    return r;
+}
+
+// cvtss2si / cvtsd2si: float -> integer rounded to nearest even (the default MXCSR mode); out of range gives the integer indefinite.
+template <class F, class I> inline I fcvtn(FU<F> a) {
+    const F x = fbits<F>(a);
+    const F hi = F(2) * F(I(1) << (bits_of<I> - 2));
+    const F r = std::nearbyint(x);
+    if (!(r >= -hi && r < hi)) return std::numeric_limits<I>::min();
+    return I(r);
+}
+
 }  // namespace dcp::rt
