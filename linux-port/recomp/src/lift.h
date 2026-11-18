@@ -24,6 +24,10 @@ std::string lift_prelude();
 // One `extern "C" void f_<hex>(Ctx*);` line per function, for the top of every generated translation unit.
 std::string lift_declarations(const std::set<uint64_t>& functions);
 
+// The sorted function table and `dcp_register(image_base, image_size)`, which installs it in the dispatch runtime. Goes after
+// lift_prelude() and lift_declarations() in one translation unit.
+std::string lift_function_table(const std::set<uint64_t>& functions);
+
 std::string function_name(uint64_t start);  // "f_<hex>"
 
 }  // namespace dcp::recomp

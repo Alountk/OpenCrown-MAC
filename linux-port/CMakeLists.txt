@@ -262,6 +262,28 @@ if(DCP_RECOMP)
       DCP_TEST_ARCH="$<IF:$<BOOL:${APPLE}>,-arch x86_64 -isysroot ${CMAKE_OSX_SYSROOT},>")
     add_test(NAME lift_diff COMMAND test_lift_diff)
   endif()
+  # Runtime of recompiled code (guest-address dispatch). Plain C++, builds for the target architecture (arm64 too).
+  add_library(dcp_rt STATIC recomp/runtime/dcp_dispatch.cpp)
+  target_include_directories(dcp_rt PUBLIC recomp/runtime)
+  add_executable(test_dispatch recomp/tests/test_dispatch.cpp)
+  target_link_libraries(test_dispatch PRIVATE dcp_rt)
+  add_test(NAME dispatch COMMAND test_dispatch)
+  # End to end: lift hand-assembled functions, compile them with the dispatch runtime, run them. Host architecture, any.
+  set(DCP_E2E_ARCH "")
+  if(APPLE)
+    if(CMAKE_OSX_ARCHITECTURES)
+      set(DCP_E2E_ARCH "-arch ${CMAKE_OSX_ARCHITECTURES}")
+    endif()
+    string(APPEND DCP_E2E_ARCH " -isysroot ${CMAKE_OSX_SYSROOT}")
+  endif()
+  add_executable(test_dispatch_e2e recomp/tests/test_dispatch_e2e.cpp)
+  target_include_directories(test_dispatch_e2e PRIVATE recomp/runtime)
+  target_link_libraries(test_dispatch_e2e PRIVATE dcp_recomp ${CMAKE_DL_LIBS})
+  target_compile_definitions(test_dispatch_e2e PRIVATE
+    DCP_TEST_CXX="${CMAKE_CXX_COMPILER}"
+    DCP_TEST_RT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/recomp/runtime"
+    DCP_TEST_ARCH="${DCP_E2E_ARCH}")
+  add_test(NAME dispatch_e2e COMMAND test_dispatch_e2e)
   add_executable(dcp_scan recomp/tools/dcp_scan.cpp)
   target_link_libraries(dcp_scan PRIVATE dcp_recomp dcp_loader)
 endif()

@@ -91,6 +91,7 @@ int main(int argc, char** argv) {
             if (!lr.unsupported.empty()) ++with_unsup;
             for (auto& [k, n] : lr.unsupported) unsup[k] += n;
         }
+        out << recomp::lift_function_table(fns);
         size_t nu = 0;
         for (auto& [k, n] : unsup) nu += n;
         std::printf("lifted %zu functions, %zu insns, %zu bytes of C++; unsupported insns %zu (%.3f%%) in %zu functions\n", lifted,
