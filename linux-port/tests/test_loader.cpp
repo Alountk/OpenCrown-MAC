@@ -7,6 +7,9 @@
 #include "loader/elf.h"
 #include "loader/hle.h"
 #include "loader/nid.h"
+#ifndef __x86_64__
+#include "dcp_dispatch.h"
+#endif
 
 using namespace dcp::loader;
 
@@ -88,8 +91,18 @@ static void test_fake_elf() {
     CHECK(binder.stats().stubs == 1 && binder.stats().data == 1 && binder.stats().unknown == 1);
     // Call the stub through the SysV ABI: logs UNIMPL once, returns 0.
     binder.finalize();
+#ifdef __x86_64__
     using Fn = DCP_SYSV uint64_t (*)(uint64_t, uint64_t, uint64_t);
     CHECK(reinterpret_cast<Fn>(at(0x30))(1, 2, 3) == 0);
+#else
+    // Recompiled build: the stub is an address, and calling it means dispatching to it with the guest's registers.
+    uint64_t stack[2] = {};
+    dcp::rt::Ctx ctx{};
+    ctx.r[dcp::rt::RSP] = reinterpret_cast<uint64_t>(&stack[0]);
+    ctx.r[dcp::rt::RDI] = 1, ctx.r[dcp::rt::RSI] = 2, ctx.r[dcp::rt::RDX] = 3, ctx.r[dcp::rt::RAX] = 99;
+    dcp::rt::call_ind(&ctx, at(0x30));
+    CHECK(ctx.r[dcp::rt::RAX] == 0 && ctx.r[dcp::rt::RSP] == reinterpret_cast<uint64_t>(&stack[0]) + 8);
+#endif
     auto calls = recent_unimpl_calls();
     CHECK(!calls.empty() && calls.back().find("libc::memcpy(1, 2, 3") == 0);
     unmap_image(img);

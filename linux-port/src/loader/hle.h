@@ -8,7 +8,11 @@
 
 #include "elf.h"
 
+#if defined(__x86_64__)
 #define DCP_SYSV __attribute__((sysv_abi))
+#else
+#define DCP_SYSV  // recompiled build: the guest's SysV convention is bridged by thunks (recomp/runtime/dcp_abi.h)
+#endif
 
 namespace dcp::loader {
 

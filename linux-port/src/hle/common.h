@@ -1,5 +1,9 @@
 // Internal helpers shared by the shim sources.
 #pragma once
+#ifndef __x86_64__
+#include "dcp_abi.h"
+#include "dcp_dispatch.h"
+#endif
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -38,7 +42,15 @@ bool trace_enabled();  // DCP_TRACE=1: log every shim call, not only the first
         }                                                                              \
     } while (0)
 
+#ifdef __x86_64__
 #define REG(lib, fn) ::dcp::loader::register_hle(lib, #fn, reinterpret_cast<void*>(&fn))
+#else
+// Recompiled build: the guest reaches the function through its GOT slot and the dispatcher; the thunk adapts the guest's
+// SysV registers to the host function (recomp/runtime/dcp_abi.h).
+#define REG(lib, fn)                                                                        \
+    (::dcp::loader::register_hle(lib, #fn, reinterpret_cast<void*>(&fn)),                   \
+     ::dcp::rt::register_host_function(reinterpret_cast<void*>(&fn), ::dcp::rt::thunk<&fn>))
+#endif
 
 // SCE kernel error codes (0x80020000 | errno).
 constexpr int32_t kOk = 0;
