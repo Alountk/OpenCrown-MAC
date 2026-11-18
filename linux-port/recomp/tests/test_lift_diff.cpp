@@ -41,6 +41,22 @@ asm(".text\n"
     "  movq %rdi, " SYM(g_code) "(%rip)\n"
     "  movq %rdx, " SYM(g_out) "(%rip)\n"
     "  movq 128(%rsi), %rax\n  pushq %rax\n  popfq\n"
+    "  vmovups 160(%rsi), %ymm0\n"
+    "  vmovups 192(%rsi), %ymm1\n"
+    "  vmovups 224(%rsi), %ymm2\n"
+    "  vmovups 256(%rsi), %ymm3\n"
+    "  vmovups 288(%rsi), %ymm4\n"
+    "  vmovups 320(%rsi), %ymm5\n"
+    "  vmovups 352(%rsi), %ymm6\n"
+    "  vmovups 384(%rsi), %ymm7\n"
+    "  vmovups 416(%rsi), %ymm8\n"
+    "  vmovups 448(%rsi), %ymm9\n"
+    "  vmovups 480(%rsi), %ymm10\n"
+    "  vmovups 512(%rsi), %ymm11\n"
+    "  vmovups 544(%rsi), %ymm12\n"
+    "  vmovups 576(%rsi), %ymm13\n"
+    "  vmovups 608(%rsi), %ymm14\n"
+    "  vmovups 640(%rsi), %ymm15\n"
     "  movq 0(%rsi), %rax\n  movq 8(%rsi), %rcx\n  movq 16(%rsi), %rdx\n  movq 24(%rsi), %rbx\n  movq 40(%rsi), %rbp\n"
     "  movq 56(%rsi), %rdi\n  movq 64(%rsi), %r8\n  movq 72(%rsi), %r9\n  movq 80(%rsi), %r10\n  movq 88(%rsi), %r11\n"
     "  movq 96(%rsi), %r12\n  movq 104(%rsi), %r13\n  movq 112(%rsi), %r14\n  movq 120(%rsi), %r15\n"
@@ -50,6 +66,22 @@ asm(".text\n"
     "  movq %rsp, " SYM(g_guest_rsp) "(%rip)\n"
     "  movq " SYM(g_host_rsp) "(%rip), %rsp\n"
     "  pushfq\n  pushq %r11\n  movq " SYM(g_out) "(%rip), %r11\n"
+    "  vmovups %ymm0, 160(%r11)\n"
+    "  vmovups %ymm1, 192(%r11)\n"
+    "  vmovups %ymm2, 224(%r11)\n"
+    "  vmovups %ymm3, 256(%r11)\n"
+    "  vmovups %ymm4, 288(%r11)\n"
+    "  vmovups %ymm5, 320(%r11)\n"
+    "  vmovups %ymm6, 352(%r11)\n"
+    "  vmovups %ymm7, 384(%r11)\n"
+    "  vmovups %ymm8, 416(%r11)\n"
+    "  vmovups %ymm9, 448(%r11)\n"
+    "  vmovups %ymm10, 480(%r11)\n"
+    "  vmovups %ymm11, 512(%r11)\n"
+    "  vmovups %ymm12, 544(%r11)\n"
+    "  vmovups %ymm13, 576(%r11)\n"
+    "  vmovups %ymm14, 608(%r11)\n"
+    "  vmovups %ymm15, 640(%r11)\n"
     "  movq %rax, 0(%r11)\n  movq %rcx, 8(%r11)\n  movq %rdx, 16(%r11)\n  movq %rbx, 24(%r11)\n  movq %rbp, 40(%r11)\n"
     "  movq %rsi, 48(%r11)\n  movq %rdi, 56(%r11)\n  movq %r8, 64(%r11)\n  movq %r9, 72(%r11)\n  movq %r10, 80(%r11)\n"
     "  movq %r12, 96(%r11)\n  movq %r13, 104(%r11)\n  movq %r14, 112(%r11)\n  movq %r15, 120(%r11)\n"
@@ -185,6 +217,32 @@ const Case kCases[] = {
     {"cmp rax, rbx\njs 1f\nmov rcx, 1\n1: nop", 0}, {"cmp rax, rbx\njns 1f\nmov rcx, 1\n1: nop", 0},
     {"cmp rax, rbx\njp 1f\nmov rcx, 1\n1: nop", 0}, {"cmp rax, rbx\njnp 1f\nmov rcx, 1\n1: nop", 0},
     {"cmp rax, rbx\njo 1f\nmov rcx, 1\n1: nop", 0}, {"cmp rax, rbx\njno 1f\nmov rcx, 1\n1: nop", 0},
+    // ---- vector moves (VEX.128 zeroes bits 255:128 of the destination, VEX.256 does not) ----
+    {"vmovups xmm0, xmm1", 0}, {"vmovups ymm2, ymm3", 0}, {"vmovups xmm4, xmmword ptr [rbx+16]", 0},
+    {"vmovups ymm5, ymmword ptr [rbx+32]", 0}, {"vmovups xmmword ptr [rbx+48], xmm6", 0},
+    {"vmovups ymmword ptr [rbx+64], ymm7", 0}, {"vmovups xmm15, xmm8", 0}, {"vmovups ymm9, ymm14", 0},
+    {"vmovaps xmm0, xmm1", 0}, {"vmovaps ymm2, ymmword ptr [rbx+32]", 0}, {"vmovaps xmmword ptr [rbx+48], xmm3", 0},
+    {"vmovdqa xmm0, xmmword ptr [rbx+16]", 0}, {"vmovdqa ymmword ptr [rbx+64], ymm1", 0},
+    {"vmovdqu xmm0, xmmword ptr [rbx+5]", 0}, {"vmovdqu ymmword ptr [rbx+7], ymm1", 0}, {"vmovdqu xmm2, xmm3", 0},
+    {"vmovupd xmm0, xmmword ptr [rbx+3]", 0}, {"vmovapd ymm1, ymm2", 0}, {"vmovapd xmmword ptr [rbx+16], xmm4", 0},
+    {IDX "vmovups xmm0, xmmword ptr [rbx+rsi*4]", 0}, {IDX "vmovups xmmword ptr [rbx+rsi*8], xmm1", 0},
+    // ---- scalar moves: loads zero the rest, the register form merges ----
+    {"vmovss xmm0, dword ptr [rbx+4]", 0}, {"vmovss dword ptr [rbx+8], xmm1", 0}, {"vmovss xmm0, xmm1, xmm2", 0},
+    {"vmovss xmm3, xmm3, xmm4", 0}, {"vmovss xmm12, xmm9, xmm10", 0},
+    {"vmovsd xmm0, qword ptr [rbx+8]", 0}, {"vmovsd qword ptr [rbx+16], xmm1", 0}, {"vmovsd xmm0, xmm1, xmm2", 0},
+    {"vmovd xmm0, eax", 0}, {"vmovd eax, xmm1", 0}, {"vmovd xmm0, dword ptr [rbx]", 0}, {"vmovd dword ptr [rbx+4], xmm2", 0},
+    {"vmovd xmm9, ecx", 0}, {"vmovd r8d, xmm10", 0},
+    {"vmovq xmm0, rax", 0}, {"vmovq rax, xmm1", 0}, {"vmovq xmm0, qword ptr [rbx]", 0}, {"vmovq qword ptr [rbx+8], xmm2", 0},
+    {"vmovq xmm0, xmm1", 0},
+    // ---- bitwise (floating-point and integer domain are the same bits) ----
+    {"vxorps xmm0, xmm1, xmm2", 0}, {"vxorps xmm0, xmm0, xmm0", 0}, {"vxorps ymm0, ymm1, ymm2", 0},
+    {"vxorps xmm3, xmm4, xmmword ptr [rbx+16]", 0}, {"vxorps ymm3, ymm4, ymmword ptr [rbx+32]", 0},
+    {"vandps xmm0, xmm1, xmm2", 0}, {"vandps ymm0, ymm1, ymmword ptr [rbx+32]", 0},
+    {"vandnps xmm0, xmm1, xmm2", 0}, {"vandnps ymm0, ymm1, ymm2", 0}, {"vorps xmm0, xmm1, xmm2", 0},
+    {"vorps ymm0, ymm1, ymmword ptr [rbx+32]", 0}, {"vxorpd xmm0, xmm1, xmm2", 0}, {"vandpd ymm0, ymm1, ymm2", 0},
+    {"vandnpd xmm0, xmm1, xmm2", 0}, {"vorpd xmm0, xmm1, xmm2", 0},
+    {"vpxor xmm0, xmm1, xmm2", 0}, {"vpxor xmm0, xmm0, xmm0", 0}, {"vpand xmm0, xmm1, xmmword ptr [rbx+16]", 0},
+    {"vpandn xmm0, xmm1, xmm2", 0}, {"vpor xmm0, xmm1, xmm2", 0}, {"vpxor xmm13, xmm14, xmm15", 0},
     // a counted loop (1..8 iterations: ecx is made non-zero first, otherwise dec wraps and it runs 2^32 times)
     {"and ecx, 7\ninc ecx\nxor eax, eax\n1: add rax, rcx\ndec ecx\njnz 1b", ALL},
     // flags set by one instruction and consumed several instructions later
@@ -321,6 +379,8 @@ int main() {
         for (int t = 0; t < 400 && bad < 2; ++t, ++trials_total) {
             Ctx in{};
             for (auto& r : in.r) r = rand_value();
+            for (auto& v : in.x)
+                for (auto& q : v.q) q = rand_value();
             in.r[dcp::rt::RBX] = ptr;
             in.r[dcp::rt::RSP] = sp;
             in.rflags = 2 | (rnd() & (CF | PF | AF | ZF | SF | OF));
@@ -350,6 +410,18 @@ int main() {
                     std::snprintf(b, sizeof b, "r[%d] native %llx lifted %llx", r, (unsigned long long)nat.r[r], (unsigned long long)lf.r[r]);
                     why = b;
                 }
+            if (ok && std::memcmp(nat.x, lf.x, sizeof nat.x)) {
+                ok = false;
+                for (int v = 0; v < 16; ++v)
+                    if (std::memcmp(&nat.x[v], &lf.x[v], sizeof(dcp::rt::Vec))) {
+                        char b[160];
+                        std::snprintf(b, sizeof b, "ymm%d native %016llx%016llx lifted %016llx%016llx (low 128 bits)", v,
+                                      (unsigned long long)nat.x[v].q[1], (unsigned long long)nat.x[v].q[0],
+                                      (unsigned long long)lf.x[v].q[1], (unsigned long long)lf.x[v].q[0]);
+                        why = b;
+                        break;
+                    }
+            }
             if (ok && (nat.rflags ^ lf.rflags) & cs.mask) {
                 ok = false;
                 char b[96];

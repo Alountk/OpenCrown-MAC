@@ -29,6 +29,16 @@ static void test_decode() {
     CHECK(decode(vex, sizeof vex, 0x1000, i));
     CHECK(i.len == 4 && i.text == "vaddps xmm0, xmm0, xmm1");
 
+    // Vector registers are reported as Reg operands with `vec` = 0..15 and no GPR index.
+    const uint8_t ymm[] = {0xc5, 0xec, 0x58, 0xcb};  // vaddps ymm1, ymm2, ymm3
+    CHECK(decode(ymm, sizeof ymm, 0x1000, i));
+    CHECK(i.nops == 3 && i.ops[0].kind == OpKind::Reg && i.ops[0].vec == 1 && i.ops[0].bits == 256 && i.ops[0].reg == kNoReg);
+    CHECK(i.ops[1].vec == 2 && i.ops[2].vec == 3);
+    const uint8_t xmm15[] = {0xc5, 0x78, 0x28, 0xf8};  // vmovaps xmm15, xmm0
+    CHECK(decode(xmm15, sizeof xmm15, 0x1000, i));
+    CHECK(i.ops[0].vec == 15 && i.ops[0].bits == 128 && i.ops[1].vec == 0);
+    CHECK(decode(add, sizeof add, 0x1000, i) && i.ops[0].vec == kNoReg);  // a GPR operand is not a vector
+
     const uint8_t bmi[] = {0xc4, 0xe2, 0x78, 0xf2, 0xc3};  // andn eax, eax, ebx (BMI1)
     CHECK(decode(bmi, sizeof bmi, 0x1000, i));
     CHECK(i.text == "andn eax, eax, ebx");

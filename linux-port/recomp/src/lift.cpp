@@ -101,7 +101,7 @@ struct Lifter {
     bool supported_operands(const Insn& in) {
         for (int i = 0; i < in.nops; ++i) {
             const Operand& o = in.ops[i];
-            if (o.kind == OpKind::Reg && o.reg == kNoReg) return unsupported(in, "non-GPR operand"), false;
+            if (o.kind == OpKind::Reg && o.reg == kNoReg && o.vec == kNoReg) return unsupported(in, "non-GPR operand"), false;
             if (o.kind == OpKind::None) return unsupported(in, "operand"), false;
         }
         return true;
@@ -136,6 +136,53 @@ struct Lifter {
         emit("return;");
     }
 
+    // ---- vector instructions (VEX only: legacy SSE leaves the upper bits alone, which this port never needs) -----
+
+    static bool is_vec(const Operand& o) { return o.kind == OpKind::Reg && o.vec != kNoReg; }
+    std::string vread(const Operand& o) const {
+        return is_vec(o) ? fmt("x[%d]", o.vec) : fmt("vld<%d>(%s)", o.bits, addr(o).c_str());
+    }
+    void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
+
+    void vector_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& d = in.ops[0];
+        const Operand& s = in.ops[1];
+        if (!starts_with(mn, "v")) return unsupported(in, "legacy SSE");
+
+        if (mn == "vmovups" || mn == "vmovaps" || mn == "vmovupd" || mn == "vmovapd" || mn == "vmovdqa" || mn == "vmovdqu" ||
+            mn == "vlddqu") {
+            if (is_vec(d)) return vset(d, vread(s));
+            return emit(fmt("vst<%d>(%s, x[%d]);", d.bits, addr(d).c_str(), s.vec));
+        }
+        if (mn == "vmovss" || mn == "vmovsd") {
+            const char* T = mn == "vmovss" ? "u32" : "u64";
+            if (in.nops == 3) return vset(d, fmt("vins<%s>(x[%d], vlo<%s>(x[%d]))", T, s.vec, T, in.ops[2].vec));
+            if (is_vec(d)) return vset(d, fmt("vscalar<%s>(ld<%s>(%s))", T, T, addr(s).c_str()));
+            return emit(fmt("st<%s>(%s, vlo<%s>(x[%d]));", T, addr(d).c_str(), T, s.vec));
+        }
+        if (mn == "vmovd" || mn == "vmovq") {
+            const char* T = mn == "vmovd" ? "u32" : "u64";
+            if (is_vec(d)) {
+                if (is_vec(s)) return vset(d, fmt("vscalar<u64>(vlo<u64>(x[%d]))", s.vec));
+                return vset(d, fmt("vscalar<%s>(%s)", T, s.kind == OpKind::Mem ? fmt("ld<%s>(%s)", T, addr(s).c_str()).c_str()
+                                                                                 : read(s, mn == "vmovd" ? 32 : 64).c_str()));
+            }
+            if (d.kind == OpKind::Mem) return emit(fmt("st<%s>(%s, vlo<%s>(x[%d]));", T, addr(d).c_str(), T, s.vec));
+            return emit(write(d, fmt("vlo<%s>(x[%d])", T, s.vec)));
+        }
+
+        struct Bit { const char* mn; const char* fn; };
+        static const Bit bits[] = {{"vxorps", "vxor"}, {"vxorpd", "vxor"}, {"vpxor", "vxor"},  {"vandps", "vand"},
+                                   {"vandpd", "vand"}, {"vpand", "vand"},  {"vandnps", "vandn"}, {"vandnpd", "vandn"},
+                                   {"vpandn", "vandn"}, {"vorps", "vor"},   {"vorpd", "vor"},     {"vpor", "vor"}};
+        for (const Bit& b : bits)
+            if (mn == b.mn && in.nops == 3)
+                return vset(d, fmt("%s(%s, %s)", b.fn, vread(s).c_str(), vread(in.ops[2]).c_str()));
+
+        unsupported(in);
+    }
+
     // ---- one instruction ---------------------------------------------------------------------------------------
 
     void insn(const Insn& in) {
@@ -167,6 +214,8 @@ struct Lifter {
 
         if (mn == "nop") return;
         if (!supported_operands(in)) return;
+        for (int i = 0; i < in.nops; ++i)
+            if (is_vec(in.ops[i])) return vector_insn(in);
         const Operand& d = in.ops[0];
         const Operand& s = in.ops[1];
         const int N = d.bits;
@@ -279,7 +328,7 @@ struct Lifter {
         if (fn.fell_off_end) body += "  __builtin_trap();  // control reaches the end of the function: a noreturn call\n";
 
         res.code = fmt("extern \"C\" void %s(Ctx* c) {\n", function_name(fn.start).c_str());
-        res.code += "  u64 r[16];\n  Flags fl;\n  DCP_LOAD();\n";
+        res.code += "  u64 r[16];\n  Vec x[16];\n  Flags fl;\n  DCP_LOAD();\n";
         res.code += body + "}\n";
         return std::move(res);
     }
@@ -294,11 +343,11 @@ std::string lift_prelude() {
 #include "dcp_rt.h"
 using namespace dcp::rt;
 #ifdef DCP_TEST_FLAGS
-#define DCP_LOAD() do { std::memcpy(r, c->r, sizeof r); fl = unpack_flags(c->rflags); } while (0)
-#define DCP_SAVE() do { std::memcpy(c->r, r, sizeof r); c->rflags = pack_flags(fl); } while (0)
+#define DCP_LOAD() do { std::memcpy(r, c->r, sizeof r); std::memcpy(x, c->x, sizeof x); fl = unpack_flags(c->rflags); } while (0)
+#define DCP_SAVE() do { std::memcpy(c->r, r, sizeof r); std::memcpy(c->x, x, sizeof x); c->rflags = pack_flags(fl); } while (0)
 #else
-#define DCP_LOAD() std::memcpy(r, c->r, sizeof r)
-#define DCP_SAVE() std::memcpy(c->r, r, sizeof r)
+#define DCP_LOAD() do { std::memcpy(r, c->r, sizeof r); std::memcpy(x, c->x, sizeof x); } while (0)
+#define DCP_SAVE() do { std::memcpy(c->r, r, sizeof r); std::memcpy(c->x, x, sizeof x); } while (0)
 #endif
 #define DCP_UNSUPPORTED(va) __builtin_trap()
 )";

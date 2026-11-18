@@ -45,6 +45,14 @@ int8_t gpr_index(ZydisRegister r, bool& high8) {
     return int8_t(ZydisRegisterGetId(r));
 }
 
+// xmm0..15 / ymm0..15 -> 0..15. zmm and the AVX-512 range are not used by this title.
+int8_t vec_index(ZydisRegister r) {
+    const ZydisRegisterClass c = ZydisRegisterGetClass(r);
+    if (c != ZYDIS_REGCLASS_XMM && c != ZYDIS_REGCLASS_YMM) return kNoReg;
+    const int id = ZydisRegisterGetId(r);
+    return id < 16 ? int8_t(id) : kNoReg;
+}
+
 }  // namespace
 
 bool decode(const uint8_t* code, size_t avail, uint64_t addr, Insn& out) {
@@ -70,6 +78,7 @@ bool decode(const uint8_t* code, size_t avail, uint64_t addr, Insn& out) {
         if (o.type == ZYDIS_OPERAND_TYPE_REGISTER) {
             d.kind = OpKind::Reg;
             d.reg = gpr_index(o.reg.value, d.high8);
+            d.vec = vec_index(o.reg.value);
         } else if (o.type == ZYDIS_OPERAND_TYPE_MEMORY) {
             d.kind = OpKind::Mem;
             bool h = false;
