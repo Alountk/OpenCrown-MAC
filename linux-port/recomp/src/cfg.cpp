@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 
 namespace dcp::recomp {
 
@@ -10,8 +11,9 @@ namespace {
 // Recognises the jump-table idiom ending in `run.back()` (a `jmp R`). `run` holds the instructions decoded along the
 // straight-line path that led here, in order. Returns false when any part of the pattern is missing or the table does
 // not stay inside the function: the jump then stays an ordinary indirect jump.
+// `table_of_reg`, when given, supplies the table address of a register that the run itself never loads (hoisted base).
 bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_t code_size, uint64_t code_base,
-                        JumpTable& out) {
+                        JumpTable& out, const std::function<bool(int, uint64_t&)>* table_of_reg = nullptr) {
     auto gpr = [](const Operand& o) { return o.kind == OpKind::Reg && o.reg != kNoReg; };
     const Insn& j = run.back();
     if (!j.nops || !gpr(j.ops[0])) return false;
@@ -52,6 +54,7 @@ bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_
         }
         if (x.nops && gpr(x.ops[0]) && x.ops[0].reg == T && x.mnemonic != "cmp" && x.mnemonic != "test") return false;
     }
+    if (!have_lea && table_of_reg && (*table_of_reg)(T, table)) have_lea = true;
     if (!have_lea) return false;
     // Bounds check: `cmp I, N` then `ja / jnbe default` before the table is touched. The compiler may schedule other
     // instructions between the two as long as none of them writes the flags.
@@ -65,7 +68,7 @@ bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_
     };
     int cmp_at = -1;
     (void)lea_at;
-    for (int k = i - 1; k >= 1 && cmp_at < 0; --k) {
+    for (int k = movsxd_at - 1; k >= 1 && cmp_at < 0; --k) {
         const Insn& x = run[size_t(k)];
         if (x.mnemonic != "ja" && x.mnemonic != "jnbe") continue;
         for (int m = k - 1; m >= 0; --m) {
@@ -135,7 +138,11 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
         else fn.tail_jumps.insert(t);
     };
 
-    while (!work.empty()) {
+    struct Pending { uint64_t addr; std::vector<Insn> run; };
+    std::vector<Pending> pending;  // indirect jumps not recognised from their own path alone
+
+    auto drain = [&] {
+      while (!work.empty()) {
         uint64_t a = work.back();
         work.pop_back();
         std::vector<Insn> run;  // the straight-line path decoded from this entry, for jump-table recognition
@@ -167,7 +174,7 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
                 else if (recover_jump_table(run, code, code_size, code_base, jt)) {
                     for (uint64_t t : jt.targets) push_target(t);
                     fn.jump_tables.emplace(in.addr, std::move(jt));
-                } else fn.has_indirect_jump = true;
+                } else pending.push_back({in.addr, run});
                 break;
             } else if (in.flow == Flow::CondJump) {
                 if (in.direct) push_target(in.target);
@@ -176,7 +183,41 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
             }
             a = next;
         }
+      }
+    };
+    drain();
+
+    // A jump table whose base register is loaded outside the jump's own path (hoisted out of a loop, set in the prologue):
+    // accept the base when the function writes that callee-saved register exactly once, with `lea reg,[rip+table]`.
+    const std::function<bool(int, uint64_t&)> hoisted_base = [&](int reg, uint64_t& table) {
+        if (reg != 3 && reg != 5 && reg < 12) return false;  // rbx, rbp, r12-r15 survive calls; the others may not
+        int writers = 0;
+        bool is_lea = false;
+        for (const auto& [a, in] : insns) {
+            if (!in.nops || in.ops[0].kind != OpKind::Reg || in.ops[0].reg != reg || in.mnemonic == "cmp" || in.mnemonic == "test") continue;
+            ++writers;
+            is_lea = in.mnemonic == "lea" && in.ops[1].kind == OpKind::Mem && in.ops[1].base == kRip;
+            if (is_lea) table = in.ops[1].rip_target;
+        }
+        return writers == 1 && is_lea;
+    };
+    for (bool progress = true; progress && !pending.empty();) {
+        progress = false;
+        std::vector<Pending> still;
+        for (Pending& p : pending) {
+            JumpTable jt;
+            if (recover_jump_table(p.run, code, code_size, code_base, jt, &hoisted_base)) {
+                for (uint64_t t : jt.targets) push_target(t);
+                fn.jump_tables.emplace(p.addr, std::move(jt));
+                progress = true;
+            } else {
+                still.push_back(std::move(p));
+            }
+        }
+        pending = std::move(still);
+        if (progress) drain();  // the newly found cases may hold more jumps
     }
+    if (!pending.empty()) fn.has_indirect_jump = true;
 
     for (uint64_t l : leaders) {
         if (!insns.count(l)) continue;

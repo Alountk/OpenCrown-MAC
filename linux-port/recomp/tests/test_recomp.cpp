@@ -98,6 +98,23 @@ static void test_jump_table() {
     CHECK(u.has_indirect_jump && u.jump_tables.empty());
 }
 
+static void test_hoisted_table_base() {
+    // The table base is loaded once, before the bounds check, in a block the jump's straight-line path does not contain:
+    //   lea rbx,[rip+table]; jmp next; next: cmp edi,2; ja default; movsxd rax,[rbx+rdi*4]; add rax,rbx; jmp rax
+    const uint8_t code[] = {0x48, 0x8d, 0x1d, 0x25, 0x00, 0x00, 0x00, 0xeb, 0x00,
+                            0x83, 0xff, 0x02, 0x77, 0x09, 0x48, 0x63, 0x04, 0xbb, 0x48, 0x01, 0xd8, 0xff, 0xe0,
+                            0x31, 0xc0, 0xc3,                          // 0x1017 default
+                            0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3,       // 0x101a case 0
+                            0xb8, 0x02, 0x00, 0x00, 0x00, 0xc3,       // 0x1020 case 1
+                            0xb8, 0x03, 0x00, 0x00, 0x00, 0xc3,       // 0x1026 case 2
+                            0xee, 0xff, 0xff, 0xff, 0xf4, 0xff, 0xff, 0xff, 0xfa, 0xff, 0xff, 0xff};  // 0x102c table
+    Function f = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    CHECK(!f.has_bad_bytes && !f.has_indirect_jump);
+    CHECK(f.jump_tables.size() == 1 && f.jump_tables.count(0x1015));
+    CHECK(f.jump_tables.at(0x1015).table == 0x102c && f.jump_tables.at(0x1015).targets.size() == 3);
+    CHECK(f.blocks.count(0x101a) && f.blocks.count(0x1020) && f.blocks.count(0x1026) && f.blocks.count(0x1017));
+}
+
 static void test_declarations() {
     // Generated functions call each other in any order, so the output starts with one declaration per function.
     const std::string d = lift_declarations({0x1000, 0x20f0});
@@ -198,6 +215,7 @@ int main() {
     test_cfg();
     test_byte_registers();
     test_jump_table();
+    test_hoisted_table_base();
     test_declarations();
     test_eh_frame();
     if (g_fail) return 1;
