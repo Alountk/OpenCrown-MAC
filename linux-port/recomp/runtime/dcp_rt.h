@@ -465,4 +465,78 @@ inline u32 fcvt_d2f(u64 a) {
     return fraw<float>(float(fbits<double>(a)));
 }
 
+// ---- packed floating point -------------------------------------------------------------------------------------
+// Lane-wise versions of the scalar helpers above. B is the register width in bits (128 or 256); bits above B are cleared.
+
+template <class U> inline U lane(const Vec& v, int i) {
+    U e;
+    std::memcpy(&e, reinterpret_cast<const u8*>(v.q) + i * sizeof(U), sizeof e);
+    return e;
+}
+template <class U> inline void setlane(Vec& v, int i, U e) { std::memcpy(reinterpret_cast<u8*>(v.q) + i * sizeof(U), &e, sizeof e); }
+template <class F, int B> constexpr int lanes_of = B / (8 * int(sizeof(F)));
+
+template <class F, int B, FU<F> (*Op)(FU<F>, FU<F>)> inline Vec vpf(const Vec& a, const Vec& b) {
+    Vec r = vzero();
+    for (int i = 0; i < lanes_of<F, B>; ++i) setlane<FU<F>>(r, i, Op(lane<FU<F>>(a, i), lane<FU<F>>(b, i)));
+    return r;
+}
+template <class F, int B> inline Vec vpsqrt(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < lanes_of<F, B>; ++i) setlane<FU<F>>(r, i, fsqrt<F>(lane<FU<F>>(a, i)));
+    return r;
+}
+template <class F, int B> inline Vec vpcmp(const Vec& a, const Vec& b, unsigned pred) {
+    Vec r = vzero();
+    for (int i = 0; i < lanes_of<F, B>; ++i) setlane<FU<F>>(r, i, fcmp<F>(lane<FU<F>>(a, i), lane<FU<F>>(b, i), pred));
+    return r;
+}
+// Horizontal add / subtract inside each 128-bit half: the low half of a half's result pairs up a, the high half pairs up b.
+template <class F, int B, bool Sub> inline Vec vphop(const Vec& a, const Vec& b) {
+    constexpr int m = 16 / int(sizeof(F));  // elements per 128-bit half
+    Vec r = vzero();
+    for (int g = 0; g < B / 128; ++g)
+        for (int j = 0; j < m / 2; ++j) {
+            const int lo = g * m + 2 * j, hi = lo + 1;
+            auto op = [](FU<F> x, FU<F> y) { return Sub ? fsub<F>(x, y) : fadd<F>(x, y); };
+            setlane<FU<F>>(r, g * m + j, op(lane<FU<F>>(a, lo), lane<FU<F>>(a, hi)));
+            setlane<FU<F>>(r, g * m + m / 2 + j, op(lane<FU<F>>(b, lo), lane<FU<F>>(b, hi)));
+        }
+    return r;
+}
+// vaddsubps / vaddsubpd: even lanes subtract, odd lanes add.
+template <class F, int B> inline Vec vpaddsub(const Vec& a, const Vec& b) {
+    Vec r = vzero();
+    for (int i = 0; i < lanes_of<F, B>; ++i)
+        setlane<FU<F>>(r, i, i % 2 ? fadd<F>(lane<FU<F>>(a, i), lane<FU<F>>(b, i)) : fsub<F>(lane<FU<F>>(a, i), lane<FU<F>>(b, i)));
+    return r;
+}
+template <int B> inline Vec vpcvtdq2ps(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<u32>(r, i, fcvti<float, i32>(lane<i32>(a, i)));
+    return r;
+}
+template <int B> inline Vec vpcvttps2dq(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<i32>(r, i, fcvtt<float, i32>(lane<u32>(a, i)));
+    return r;
+}
+
+// roundss / roundps: imm bits 1:0 select nearest-even, floor, ceil, truncate; bit 2 defers to MXCSR (nearest-even here).
+template <class F> inline FU<F> fround(FU<F> a, unsigned imm) {
+    const F x = fbits<F>(a);
+    if (std::isnan(x)) return a | FT<F>::kQuiet;
+    switch ((imm & 4) ? 0 : (imm & 3)) {
+    case 0: return fraw<F>(std::nearbyint(x));
+    case 1: return fraw<F>(std::floor(x));
+    case 2: return fraw<F>(std::ceil(x));
+    default: return fraw<F>(std::trunc(x));
+    }
+}
+template <class F, int B> inline Vec vpround(const Vec& a, unsigned imm) {
+    Vec r = vzero();
+    for (int i = 0; i < lanes_of<F, B>; ++i) setlane<FU<F>>(r, i, fround<F>(lane<FU<F>>(a, i), imm));
+    return r;
+}
+
 }  // namespace dcp::rt

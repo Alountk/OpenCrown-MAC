@@ -100,6 +100,10 @@ namespace {
 
 constexpr unsigned CF = 1u << 0, PF = 1u << 2, AF = 1u << 4, ZF = 1u << 6, SF = 1u << 7, OF = 1u << 11;
 constexpr unsigned ALL = CF | PF | AF | ZF | SF | OF;
+// Case flags (bits no x86 flag uses): Rosetta 2 computes vhsub* and vaddsub* with a negation, so the sign of a NaN result
+// (default NaN or propagated operand) is the opposite of what the Intel and AMD manuals define; the lifter follows the
+// manuals. These cases compare vector lanes with the sign of NaN lanes ignored, for 32-bit or 64-bit lanes.
+constexpr unsigned NAN32 = 1u << 31, NAN64 = 1u << 30;
 constexpr unsigned NOAF = ALL & ~AF;  // and / or / xor / test: AF is architecturally undefined
 
 struct Case { const char* text; unsigned mask; };
@@ -276,6 +280,30 @@ const Case kCases[] = {
     {"vcvttsd2si eax, qword ptr [rbx+8]", 0}, {"vcvttsd2si r9, xmm12", 0},
     {"vcvtss2sd xmm0, xmm1, xmm2", 0}, {"vcvtss2sd xmm0, xmm1, dword ptr [rbx]", 0}, {"vcvtsd2ss xmm0, xmm1, xmm2", 0},
     {"vcvtsd2ss xmm0, xmm1, qword ptr [rbx+8]", 0},
+    // ---- packed float arithmetic: every lane follows the scalar rules; xmm clears 255:128 ----
+    {"vaddps xmm0, xmm1, xmm2", 0}, {"vaddps ymm0, ymm1, ymm2", 0}, {"vaddps xmm3, xmm4, xmmword ptr [rbx+16]", 0},
+    {"vaddps ymm3, ymm4, ymmword ptr [rbx+32]", 0}, {"vaddps xmm12, xmm9, xmm15", 0}, {"vsubps xmm0, xmm1, xmm2", 0},
+    {"vsubps ymm0, ymm1, ymmword ptr [rbx+32]", 0}, {"vmulps xmm0, xmm1, xmm2", 0}, {"vmulps ymm0, ymm1, ymm2", 0},
+    {"vmulps xmm3, xmm4, xmmword ptr [rbx]", 0}, {"vdivps xmm0, xmm1, xmm2", 0}, {"vdivps ymm0, ymm1, ymm2", 0},
+    {"vminps xmm0, xmm1, xmm2", 0}, {"vminps ymm0, ymm1, ymm2", 0}, {"vmaxps xmm0, xmm1, xmm2", 0},
+    {"vmaxps ymm0, ymm1, ymmword ptr [rbx+32]", 0}, {"vsqrtps xmm0, xmm1", 0}, {"vsqrtps ymm0, ymmword ptr [rbx+32]", 0},
+    {"vaddpd xmm0, xmm1, xmm2", 0}, {"vaddpd ymm0, ymm1, ymm2", 0}, {"vsubpd xmm0, xmm1, xmm2", 0},
+    {"vmulpd xmm0, xmm1, xmm2", 0}, {"vmulpd ymm0, ymm1, ymmword ptr [rbx+32]", 0}, {"vdivpd xmm0, xmm1, xmm2", 0},
+    {"vminpd xmm0, xmm1, xmm2", 0}, {"vmaxpd ymm0, ymm1, ymm2", 0}, {"vsqrtpd xmm0, xmm1", 0},
+    {"vhaddps xmm0, xmm1, xmm2", 0}, {"vhaddps ymm0, ymm1, ymm2", 0}, {"vhsubps xmm0, xmm1, xmm2", NAN32},
+    {"vhsubps ymm0, ymm1, ymmword ptr [rbx+32]", NAN32}, {"vhaddpd xmm0, xmm1, xmm2", 0}, {"vhsubpd ymm0, ymm1, ymm2", NAN64},
+    {"vaddsubps xmm0, xmm1, xmm2", NAN32}, {"vaddsubpd ymm0, ymm1, ymm2", NAN64},
+    {"vcmpps xmm0, xmm1, xmm2, 0", 0}, {"vcmpps xmm0, xmm1, xmm2, 1", 0}, {"vcmpps xmm0, xmm1, xmm2, 2", 0},
+    {"vcmpps xmm0, xmm1, xmm2, 3", 0}, {"vcmpps xmm0, xmm1, xmm2, 4", 0}, {"vcmpps xmm0, xmm1, xmm2, 5", 0},
+    {"vcmpps xmm0, xmm1, xmm2, 6", 0}, {"vcmpps xmm0, xmm1, xmm2, 7", 0}, {"vcmpps xmm0, xmm1, xmm2, 13", 0},
+    {"vcmpps ymm0, ymm1, ymm2, 14", 0}, {"vcmpps ymm0, ymm1, ymmword ptr [rbx+32], 1", 0}, {"vcmppd xmm0, xmm1, xmm2, 2", 0},
+    {"vcmppd ymm0, ymm1, ymm2, 4", 0},
+    {"vcvtdq2ps xmm0, xmm1", 0}, {"vcvtdq2ps ymm0, ymm1", 0}, {"vcvtdq2ps xmm0, xmmword ptr [rbx+16]", 0},
+    {"vcvttps2dq xmm0, xmm1", 0}, {"vcvttps2dq ymm0, ymm1", 0}, {"vcvttps2dq xmm0, xmmword ptr [rbx+16]", 0},
+    {"vroundps xmm0, xmm1, 0", 0}, {"vroundps xmm0, xmm1, 1", 0}, {"vroundps xmm0, xmm1, 2", 0}, {"vroundps xmm0, xmm1, 3", 0},
+    {"vroundps ymm0, ymm1, 1", 0}, {"vroundps xmm0, xmm1, 4", 0}, {"vroundpd xmm0, xmm1, 2", 0}, {"vroundpd ymm0, ymm1, 3", 0},
+    {"vroundss xmm0, xmm1, xmm2, 0", 0}, {"vroundss xmm0, xmm1, xmm2, 1", 0}, {"vroundss xmm0, xmm1, xmm2, 2", 0},
+    {"vroundss xmm0, xmm1, xmm2, 3", 0}, {"vroundsd xmm0, xmm1, xmm2, 1", 0}, {"vroundsd xmm0, xmm1, xmm2, 2", 0},
     // a counted loop (1..8 iterations: ecx is made non-zero first, otherwise dec wraps and it runs 2^32 times)
     {"and ecx, 7\ninc ecx\nxor eax, eax\n1: add rax, rcx\ndec ecx\njnz 1b", ALL},
     // flags set by one instruction and consumed several instructions later
@@ -464,6 +492,20 @@ int main() {
                     std::snprintf(b, sizeof b, "r[%d] native %llx lifted %llx", r, (unsigned long long)nat.r[r], (unsigned long long)lf.r[r]);
                     why = b;
                 }
+            if (cs.mask & (NAN32 | NAN64)) {
+                for (auto* v : {&nat, &lf})
+                    for (auto& vec : v->x)
+                        for (auto& q : vec.q) {
+                            if (cs.mask & NAN64) {
+                                if ((q & 0x7fffffffffffffffull) > 0x7ff0000000000000ull) q &= 0x7fffffffffffffffull;
+                            } else {
+                                for (int h = 0; h < 2; ++h) {
+                                    const uint32_t e = uint32_t(q >> (32 * h));
+                                    if ((e & 0x7fffffffu) > 0x7f800000u) q &= ~(0x80000000ull << (32 * h));
+                                }
+                            }
+                        }
+            }
             if (ok && std::memcmp(nat.x, lf.x, sizeof nat.x)) {
                 ok = false;
                 for (int v = 0; v < 16; ++v)

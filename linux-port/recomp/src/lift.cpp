@@ -202,6 +202,9 @@ struct Lifter {
             if (base == "cmp" && in.nops == 4)
                 return vset(d, fmt("vins<%s>(x[%d], fcmp<%s>(vlo<%s>(x[%d]), %s, %uu))", U, s.vec, F, U, s.vec,
                                    elem(in.ops[2], U).c_str(), unsigned(in.ops[3].imm) & 15u));
+            if (base == "round" && in.nops == 4)
+                return vset(d, fmt("vins<%s>(x[%d], fround<%s>(%s, %uu))", U, s.vec, F, elem(in.ops[2], U).c_str(),
+                                   unsigned(in.ops[3].imm) & 7u));
             if (base == "cvtsi2" && in.nops == 3) {
                 const char* I = in.ops[2].bits == 64 ? "i64" : "i32";
                 return vset(d, fmt("vins<%s>(x[%d], fcvti<%s, %s>((%s)%s))", U, s.vec, F, I, I, read(in.ops[2]).c_str()));
@@ -222,6 +225,31 @@ struct Lifter {
             return vset(d, fmt("vins<u32>(x[%d], fcvt_d2f(%s))", s.vec,
                                is_vec(in.ops[2]) ? fmt("vlo<u64>(x[%d])", in.ops[2].vec).c_str()
                                                  : fmt("ld<u64>(%s)", addr(in.ops[2]).c_str()).c_str()));
+
+
+        // packed float: ps = float, pd = double; the register width comes from the destination
+        if (mn.size() > 3 && is_vec(d) && (mn.compare(mn.size() - 2, 2, "ps") == 0 || mn.compare(mn.size() - 2, 2, "pd") == 0)) {
+            const char* F = mn.back() == 'd' ? "double" : "float";
+            const int B = d.bits;
+            const std::string base = mn.substr(1, mn.size() - 3);
+            static const char* arith[] = {"add", "sub", "mul", "div", "min", "max"};
+            for (const char* a : arith)
+                if (base == a && in.nops == 3)
+                    return vset(d, fmt("vpf<%s, %d, f%s<%s>>(%s, %s)", F, B, a, F, vread(s).c_str(), vread(in.ops[2]).c_str()));
+            if (base == "sqrt" && in.nops == 2) return vset(d, fmt("vpsqrt<%s, %d>(%s)", F, B, vread(s).c_str()));
+            if (base == "cmp" && in.nops == 4)
+                return vset(d, fmt("vpcmp<%s, %d>(%s, %s, %uu)", F, B, vread(s).c_str(), vread(in.ops[2]).c_str(),
+                                   unsigned(in.ops[3].imm) & 15u));
+            if ((base == "hadd" || base == "hsub") && in.nops == 3)
+                return vset(d, fmt("vphop<%s, %d, %s>(%s, %s)", F, B, base == "hsub" ? "true" : "false", vread(s).c_str(),
+                                   vread(in.ops[2]).c_str()));
+            if (base == "addsub" && in.nops == 3)
+                return vset(d, fmt("vpaddsub<%s, %d>(%s, %s)", F, B, vread(s).c_str(), vread(in.ops[2]).c_str()));
+            if (base == "round" && in.nops == 3)
+                return vset(d, fmt("vpround<%s, %d>(%s, %uu)", F, B, vread(s).c_str(), unsigned(in.ops[2].imm) & 7u));
+        }
+        if (mn == "vcvtdq2ps" && in.nops == 2) return vset(d, fmt("vpcvtdq2ps<%d>(%s)", d.bits, vread(s).c_str()));
+        if (mn == "vcvttps2dq" && in.nops == 2) return vset(d, fmt("vpcvttps2dq<%d>(%s)", d.bits, vread(s).c_str()));
 
         unsupported(in);
     }
