@@ -42,7 +42,11 @@ int8_t gpr_index(ZydisRegister r, bool& high8) {
     if (c != ZYDIS_REGCLASS_GPR8 && c != ZYDIS_REGCLASS_GPR16 && c != ZYDIS_REGCLASS_GPR32 && c != ZYDIS_REGCLASS_GPR64)
         return kNoReg;
     if (high8) return int8_t(r - ZYDIS_REGISTER_AH + 0);  // AH=0 (rax), CH=1 (rcx), DH=2 (rdx), BH=3 (rbx) in this order
-    return int8_t(ZydisRegisterGetId(r));
+    const int id = ZydisRegisterGetId(r);
+    // Zydis numbers the 8-bit registers in enum order (al..bh = 0..7, spl bpl sil dil = 8..11, r8b..r15b = 12..19); the REX
+    // encoding wants spl..dil = 4..7 and r8b..r15b = 8..15. The wider classes already use the encoding.
+    if (c == ZYDIS_REGCLASS_GPR8 && id >= 8) return int8_t(id - 4);
+    return int8_t(id);
 }
 
 // xmm0..15 / ymm0..15 -> 0..15. zmm and the AVX-512 range are not used by this title.
