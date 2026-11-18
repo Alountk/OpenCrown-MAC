@@ -120,6 +120,17 @@ static void test_typed_calls() {
     CHECK(g_tid_calls == 2);
 }
 
+// guest function 0x60: rax = rdi * 1000 + rsi * 10 + rdx (an entry point with a second and third argument)
+static void guest_three(Ctx* c) { c->r[RAX] = c->r[RDI] * 1000 + c->r[RSI] * 10 + c->r[RDX], c->r[RSP] += 8; }
+
+static void test_entry_with_arguments() {
+    static const FnEntry table[] = {{0x60, guest_three}};
+    add_module(reinterpret_cast<u64>(g_image) + 0x800, 0x100, table, 1);  // a separate module so the others stay as set up
+    const u64 fn = reinterpret_cast<u64>(g_image) + 0x800 + 0x60;
+    CHECK(run_guest(fn, 4, 1 << 16, 5, 6) == 4056);  // the process entry point takes (params, exit callback)
+    CHECK(run_guest(fn, 1, 1 << 16) == 1000);
+}
+
 static void test_concurrent_threads() {
     // Each thread has its own Ctx and guest stack.
     std::thread t[4];
@@ -135,6 +146,7 @@ int main() {
     test_thread_entry();
     test_register_preservation();
     test_typed_calls();
+    test_entry_with_arguments();
     test_concurrent_threads();
     if (g_fail) return std::fprintf(stderr, "guest: %d check(s) failed\n", g_fail), 1;
     std::puts("guest: all tests passed");
