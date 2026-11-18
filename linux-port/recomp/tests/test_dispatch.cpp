@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "dcp_abi.h"
 #include "dcp_dispatch.h"
 
 using namespace dcp::rt;
@@ -52,6 +53,40 @@ static void test_lookup_and_dispatch() {
     CHECK(g_foreign_calls == 3 && g_foreign_target == base + 0x7ff0);
 }
 
+static int host_add(int a, int b) { return a + b; }
+static void host_poke(u64* out, u64 v) { *out = v; }
+
+static void test_host_functions() {
+    // An HLE function is a host function the guest reaches by pointer (a GOT slot); its thunk adapts the guest registers.
+    set_image(reinterpret_cast<u64>(g_image), sizeof g_image);
+    const FnEntry table[] = {{0x10, fn_a}};
+    set_function_table(table, 1);
+    set_foreign_handler(foreign);
+    register_host_function(reinterpret_cast<void*>(&host_add), thunk<host_add>);
+    register_host_function(reinterpret_cast<void*>(&host_poke), thunk<host_poke>);
+
+    const int before = g_foreign_calls;
+    u64 stack[4] = {};
+    Ctx c{};
+    c.r[RSP] = reinterpret_cast<u64>(&stack[0]);  // the return address slot of the call being made
+    c.r[RDI] = 40, c.r[RSI] = 2;
+    call_ind(&c, reinterpret_cast<u64>(&host_add));
+    CHECK(c.r[RAX] == 42 && c.r[RSP] == reinterpret_cast<u64>(&stack[0]) + 8 && g_foreign_calls == before);
+
+    u64 slot = 0;
+    c.r[RSP] = reinterpret_cast<u64>(&stack[0]);
+    c.r[RDI] = reinterpret_cast<u64>(&slot), c.r[RSI] = 99;
+    jmp_ind(&c, reinterpret_cast<u64>(&host_poke));  // a tail jump to an import behaves the same
+    CHECK(slot == 99 && c.r[RSP] == reinterpret_cast<u64>(&stack[0]) + 8);
+
+    // Recompiled functions win over host functions; an unregistered host pointer is still foreign.
+    c.r[RAX] = 0;
+    call_ind(&c, reinterpret_cast<u64>(g_image) + 0x10);
+    CHECK(c.r[RAX] == 1);
+    call_ind(&c, reinterpret_cast<u64>(&slot));
+    CHECK(g_foreign_calls == before + 1);
+}
+
 static void test_large_table() {
     // The binary search must find every entry and reject every neighbour, whatever the spacing.
     std::vector<FnEntry> table;
@@ -69,6 +104,7 @@ static void test_large_table() {
 int main() {
     test_lookup_and_dispatch();
     test_large_table();
+    test_host_functions();
     if (g_fail) return std::fprintf(stderr, "dispatch: %d check(s) failed\n", g_fail), 1;
     std::puts("dispatch: all tests passed");
     return 0;

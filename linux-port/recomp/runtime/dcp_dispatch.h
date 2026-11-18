@@ -24,6 +24,10 @@ void set_function_table(const FnEntry* sorted, size_t count);
 using ForeignHandler = void (*)(Ctx*, u64 target);
 void set_foreign_handler(ForeignHandler handler);
 
+// A host function the guest can reach by pointer (an HLE import: the loader stores its address in the guest's GOT).
+// `thunk` adapts the guest registers to it (see dcp_abi.h) and pops the return address. Register before running guest code.
+void register_host_function(const void* host_fn, Fn thunk);
+
 // The recompiled function whose entry is exactly at host pointer `target`, or nullptr.
 Fn find_function(u64 target);
 

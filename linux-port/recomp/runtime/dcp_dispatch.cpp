@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_map>
 
 namespace dcp::rt {
 
@@ -18,16 +19,19 @@ void default_foreign(Ctx*, u64 target) {
     std::abort();
 }
 ForeignHandler g_foreign = default_foreign;
+std::unordered_map<u64, Fn> g_host;  // written before guest code runs, read-only afterwards
 
 // A call and a jump dispatch the same way: the caller (or the code that pushed the return address) is already set up.
 void dispatch(Ctx* c, u64 target) {
     if (Fn f = find_function(target)) return f(c);
+    if (auto it = g_host.find(target); it != g_host.end()) return it->second(c);
     g_foreign(c, target);
 }
 }  // namespace
 
 void set_image(u64 base, u64 size) { dcp_img = base, g_size = size; }
 void set_function_table(const FnEntry* sorted, size_t count) { g_table = sorted, g_count = count; }
+void register_host_function(const void* host_fn, Fn thunk) { g_host[reinterpret_cast<u64>(host_fn)] = thunk; }
 void set_foreign_handler(ForeignHandler handler) { g_foreign = handler ? handler : default_foreign; }
 
 Fn find_function(u64 target) {
