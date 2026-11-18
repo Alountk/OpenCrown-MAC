@@ -2,6 +2,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 namespace dcp::recomp {
@@ -143,6 +144,79 @@ struct Lifter {
         return is_vec(o) ? fmt("x[%d]", o.vec) : fmt("vld<%d>(%s)", o.bits, addr(o).c_str());
     }
     void vset(const Operand& d, const std::string& v) { emit(fmt("x[%d] = vcut<%d>(%s);", d.vec, d.bits, v.c_str())); }
+
+    // 128-bit integer SIMD families. Returns false when `in` is none of them.
+    bool int_simd_insn(const Insn& in) {
+        const std::string& mn = in.mnemonic;
+        const Operand& d = in.ops[0];
+        const Operand& s = in.ops[1];
+        const Operand& t = in.ops[2];
+        auto V = [&](const std::string& e) { vset(d, e); return true; };
+        auto lane_t = [](char c) -> const char* {
+            switch (c) { case 'b': return "u8"; case 'w': return "u16"; case 'd': return "u32"; case 'q': return "u64"; default: return nullptr; }
+        };
+        auto imm = [&](const Operand& o) { return unsigned(o.imm) & 0xffu; };
+        auto ends = [&](const char* p, std::string& rest) {
+            const size_t n = std::strlen(p);
+            if (mn.size() > n && mn.compare(0, n, p) == 0) return rest = mn.substr(n), true;
+            return false;
+        };
+        std::string r;
+        if (in.nops == 3 && is_vec(d) && is_vec(s)) {
+            static const char* bin[] = {"vpadd", "vpsub", "vpcmpeq", "vpcmpgt"};
+            for (const char* b : bin)
+                if (ends(b, r) && r.size() == 1 && lane_t(r[0]))
+                    return V(fmt("%s<%s>(x[%d], %s)", b, lane_t(r[0]), s.vec, vread(t).c_str()));
+            if (ends("vpunpckl", r) || ends("vpunpckh", r)) {
+                const bool hi = mn[7] == 'h';
+                static const char* k[][2] = {{"bw", "u8"}, {"wd", "u16"}, {"dq", "u32"}, {"qdq", "u64"}};
+                for (auto& e : k)
+                    if (r == e[0]) return V(fmt("vunpck<%s, %s, 128>(x[%d], %s)", e[1], hi ? "true" : "false", s.vec, vread(t).c_str()));
+            }
+            if (mn == "vpshufb") return V(fmt("vpshufb(x[%d], %s)", s.vec, vread(t).c_str()));
+            if (mn == "vpmulld") return V(fmt("vpmul<u32>(x[%d], %s)", s.vec, vread(t).c_str()));
+            if (ends("vphadd", r) || ends("vphsub", r)) {
+                if (r.size() == 1 && (r[0] == 'd' || r[0] == 'w'))
+                    return V(fmt("vphaddi<%s, %s>(x[%d], %s)", lane_t(r[0]), mn[3] == 's' ? "true" : "false", s.vec, vread(t).c_str()));
+            }
+            if (ends("vpsll", r) || ends("vpsrl", r) || ends("vpsra", r)) {
+                if (r.size() == 1 && r[0] != 'b' && lane_t(r[0]) && !(mn[4] == 'a' && r[0] == 'q')) {
+                    const std::string cnt = t.kind == OpKind::Imm ? fmt("%uull", imm(t)) : fmt("lane<u64>(%s, 0)", vread(t).c_str());
+                    return V(fmt("%s<%s>(x[%d], %s)", mn.substr(0, 5).c_str(), lane_t(r[0]), s.vec, cnt.c_str()));
+                }
+            }
+            if (ends("vpack", r) && r.size() == 4 && (r.substr(0, 2) == "us" || r.substr(0, 2) == "ss")) {
+                const bool u = r[0] == 'u';
+                const std::string w = r.substr(2);
+                if (w == "wb") return V(fmt("vpack<i16, %s>(x[%d], %s)", u ? "u8" : "i8", s.vec, vread(t).c_str()));
+                if (w == "dw") return V(fmt("vpack<i32, %s>(x[%d], %s)", u ? "u16" : "i16", s.vec, vread(t).c_str()));
+            }
+        }
+        if (in.nops == 4 && mn == "vpblendw") return V(fmt("vblendi<u16, 128>(x[%d], %s, %uu)", s.vec, vread(t).c_str(), imm(in.ops[3])));
+        if (in.nops == 4 && mn == "vpblendvb") return V(fmt("vblendv<u8, 128>(x[%d], %s, x[%d])", s.vec, vread(t).c_str(), in.ops[3].vec));
+        if (in.nops == 3 && t.kind == OpKind::Imm && is_vec(d)) {
+            if (mn == "vpshufd") return V(fmt("vpermilps_i<128>(%s, %uu)", vread(s).c_str(), imm(t)));
+            if (mn == "vpshuflw" || mn == "vpshufhw") return V(fmt("%s(%s, %uu)", mn.c_str(), vread(s).c_str(), imm(t)));
+            if (mn == "vpslldq" || mn == "vpsrldq") return V(fmt("%s(x[%d], %uu)", mn.c_str(), s.vec, imm(t)));
+        }
+        if (in.nops == 2 && is_vec(d) && (ends("vpmovzx", r) || ends("vpmovsx", r)) && r.size() == 2) {
+            const bool sx = mn[5] == 's';
+            auto st = [&](char c) -> std::string { return std::string(sx ? "i" : "u") + (c == 'b' ? "8" : c == 'w' ? "16" : "32"); };
+            const char* dt = r[1] == 'w' ? "u16" : r[1] == 'd' ? "u32" : "u64";
+            return V(fmt("vpmovx<%s, %s>(%s)", st(r[0]).c_str(), dt, vread(s).c_str()));
+        }
+        if (in.nops == 4 && is_vec(d) && ends("vpinsr", r) && r.size() == 1 && lane_t(r[0]))
+            return V(fmt("vpins<%s>(x[%d], %s, %uu)", lane_t(r[0]), s.vec, read(t, r[0] == 'b' ? 8 : r[0] == 'w' ? 16 : r[0] == 'd' ? 32 : 64).c_str(), imm(in.ops[3])));
+        if (in.nops == 3 && is_vec(s) && ends("vpextr", r) && r.size() == 1 && lane_t(r[0])) {
+            const char* T = lane_t(r[0]);
+            const int n = r[0] == 'b' ? 16 : r[0] == 'w' ? 8 : r[0] == 'd' ? 4 : 2;
+            const std::string e = fmt("lane<%s>(x[%d], %u)", T, s.vec, imm(t) % unsigned(n));
+            if (d.kind == OpKind::Mem) emit(fmt("st<%s>(%s, %s);", T, addr(d).c_str(), e.c_str()));
+            else emit(write(d, e));
+            return true;
+        }
+        return false;
+    }
 
     // Blends, shuffles, lane inserts / extracts and broadcasts. Returns false when `in` is none of them.
     bool shuffle_insn(const Insn& in) {
@@ -320,6 +394,7 @@ struct Lifter {
         if (mn == "vcvtdq2ps" && in.nops == 2) return vset(d, fmt("vpcvtdq2ps<%d>(%s)", d.bits, vread(s).c_str()));
         if (mn == "vcvttps2dq" && in.nops == 2) return vset(d, fmt("vpcvttps2dq<%d>(%s)", d.bits, vread(s).c_str()));
 
+        if (int_simd_insn(in)) return;
         if (shuffle_insn(in)) return;
         unsupported(in);
     }

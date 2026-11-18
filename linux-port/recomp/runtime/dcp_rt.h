@@ -654,4 +654,112 @@ template <class U, int B> inline u32 vmovmsk(const Vec& a) {
     return m;
 }
 
+// ---- 128-bit integer SIMD ---------------------------------------------------------------------------------------
+// AVX1 only has 128-bit integer instructions, so these always clear bits 255:128. Lane type U is u8, u16, u32 or u64.
+
+template <class U, class Op> inline Vec vpmap(const Vec& a, const Vec& b, Op op) {
+    Vec r = vzero();
+    for (int i = 0; i < 16 / int(sizeof(U)); ++i) setlane<U>(r, i, op(lane<U>(a, i), lane<U>(b, i)));
+    return r;
+}
+template <class U> inline Vec vpadd(const Vec& a, const Vec& b) { return vpmap<U>(a, b, [](U x, U y) { return U(x + y); }); }
+template <class U> inline Vec vpsub(const Vec& a, const Vec& b) { return vpmap<U>(a, b, [](U x, U y) { return U(x - y); }); }
+template <class U> inline Vec vpmul(const Vec& a, const Vec& b) { return vpmap<U>(a, b, [](U x, U y) { return U(x * y); }); }
+template <class U> inline Vec vpcmpeq(const Vec& a, const Vec& b) { return vpmap<U>(a, b, [](U x, U y) { return x == y ? U(~U(0)) : U(0); }); }
+template <class U> inline Vec vpcmpgt(const Vec& a, const Vec& b) {
+    return vpmap<U>(a, b, [](U x, U y) { return S<U>(x) > S<U>(y) ? U(~U(0)) : U(0); });
+}
+// phaddd / phaddw / phsubd / phsubw
+template <class U, bool Sub> inline Vec vphaddi(const Vec& a, const Vec& b) {
+    constexpr int n = 16 / int(sizeof(U));
+    Vec r = vzero();
+    for (int j = 0; j < n / 2; ++j) {
+        auto op = [](U x, U y) { return Sub ? U(x - y) : U(x + y); };
+        setlane<U>(r, j, op(lane<U>(a, 2 * j), lane<U>(a, 2 * j + 1)));
+        setlane<U>(r, n / 2 + j, op(lane<U>(b, 2 * j), lane<U>(b, 2 * j + 1)));
+    }
+    return r;
+}
+inline Vec vpshuflw(const Vec& a, unsigned imm) {
+    Vec r = vzero();
+    r.q[1] = a.q[1];
+    for (int j = 0; j < 4; ++j) setlane<u16>(r, j, lane<u16>(a, int((imm >> (2 * j)) & 3)));
+    return r;
+}
+inline Vec vpshufhw(const Vec& a, unsigned imm) {
+    Vec r = vzero();
+    r.q[0] = a.q[0];
+    for (int j = 0; j < 4; ++j) setlane<u16>(r, 4 + j, lane<u16>(a, 4 + int((imm >> (2 * j)) & 3)));
+    return r;
+}
+inline Vec vpshufb(const Vec& a, const Vec& c) {
+    Vec r = vzero();
+    for (int i = 0; i < 16; ++i) {
+        const u8 k = lane<u8>(c, i);
+        setlane<u8>(r, i, k & 0x80 ? u8(0) : lane<u8>(a, k & 15));
+    }
+    return r;
+}
+// Byte shifts of the whole 128-bit register.
+inline Vec vpslldq(const Vec& a, unsigned n) {
+    Vec r = vzero();
+    if (n > 15) return r;
+    const u128 v = ((u128(a.q[1]) << 64) | a.q[0]) << (8 * n);
+    r.q[0] = u64(v), r.q[1] = u64(v >> 64);
+    return r;
+}
+inline Vec vpsrldq(const Vec& a, unsigned n) {
+    Vec r = vzero();
+    if (n > 15) return r;
+    const u128 v = ((u128(a.q[1]) << 64) | a.q[0]) >> (8 * n);
+    r.q[0] = u64(v), r.q[1] = u64(v >> 64);
+    return r;
+}
+// Shifts of every lane by one count; a count at or above the lane width gives 0 (sign fill for the arithmetic shift).
+template <class U> inline Vec vpsll(const Vec& a, u64 c) {
+    Vec r = vzero();
+    for (int i = 0; i < 16 / int(sizeof(U)); ++i) setlane<U>(r, i, c >= bits_of<U> ? U(0) : U(lane<U>(a, i) << c));
+    return r;
+}
+template <class U> inline Vec vpsrl(const Vec& a, u64 c) {
+    Vec r = vzero();
+    for (int i = 0; i < 16 / int(sizeof(U)); ++i) setlane<U>(r, i, c >= bits_of<U> ? U(0) : U(lane<U>(a, i) >> c));
+    return r;
+}
+template <class U> inline Vec vpsra(const Vec& a, u64 c) {
+    Vec r = vzero();
+    for (int i = 0; i < 16 / int(sizeof(U)); ++i) {
+        const S<U> v = S<U>(lane<U>(a, i));
+        setlane<U>(r, i, c >= bits_of<U> ? U(v < 0 ? ~U(0) : U(0)) : U(S<U>(v >> c)));
+    }
+    return r;
+}
+// pmovzx / pmovsx: widen the low elements of a (Src is signed for the sign-extending form); Dst is unsigned.
+template <class Src, class Dst> inline Vec vpmovx(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < 16 / int(sizeof(Dst)); ++i) setlane<Dst>(r, i, Dst(lane<Src>(a, i)));
+    return r;
+}
+// packsswb / packuswb / packssdw / packusdw: saturate the signed Src lanes of a then b to the range of D.
+template <class Src, class D> inline Vec vpack(const Vec& a, const Vec& b) {
+    constexpr int n = 16 / int(sizeof(Src));
+    auto sat = [](Src v) -> D {
+        if (v < Src(std::numeric_limits<D>::min())) return std::numeric_limits<D>::min();
+        if (v > Src(std::numeric_limits<D>::max())) return std::numeric_limits<D>::max();
+        return D(v);
+    };
+    Vec r = vzero();
+    for (int i = 0; i < n; ++i) {
+        setlane<D>(r, i, sat(lane<Src>(a, i)));
+        setlane<D>(r, n + i, sat(lane<Src>(b, i)));
+    }
+    return r;
+}
+template <class U> inline Vec vpins(const Vec& a, U e, unsigned idx) {
+    Vec r = a;
+    r.q[2] = r.q[3] = 0;
+    setlane<U>(r, int(idx % (16 / sizeof(U))), e);
+    return r;
+}
+
 }  // namespace dcp::rt
