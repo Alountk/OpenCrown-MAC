@@ -35,6 +35,11 @@ struct Ctx {
 };
 static_assert(__builtin_offsetof(Ctx, x) == 160, "the differential test's assembly trampoline hard-codes this layout");
 
+// The guest context of the guest code that is currently calling into the host on this thread (set while an HLE thunk runs),
+// so a host function can call back into guest code. Null on a thread that is not inside a host call.
+inline thread_local Ctx* g_current_ctx = nullptr;
+inline Ctx* current_ctx() { return g_current_ctx; }
+
 enum Reg { RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI, R8, R9, R10, R11, R12, R13, R14, R15 };
 
 // Dispatch for calls whose target is not a statically known recompiled function (T4 provides the definitions).

@@ -63,6 +63,11 @@ template <class R> void set_result(Ctx* c, R r) {
 }
 
 template <class R, class... A> void call(Ctx* c, R (*fn)(A...)) {
+    struct Scope {  // lets the host function call back into guest code (call_guest)
+        Ctx* prev;
+        explicit Scope(Ctx* x) : prev(g_current_ctx) { g_current_ctx = x; }
+        ~Scope() { g_current_ctx = prev; }
+    } scope(c);
     Cursor cur{c};
     std::tuple<A...> args{next_arg<A>(cur)...};  // braced initialisation evaluates left to right
     if constexpr (std::is_void_v<R>) std::apply(fn, args);
