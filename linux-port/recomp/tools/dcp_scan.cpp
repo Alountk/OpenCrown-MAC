@@ -1,6 +1,7 @@
 // dcp_scan <eboot.bin|prx>: function and block statistics for a decrypted PS4 module. Reads the file, prints counts only.
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -79,7 +80,7 @@ int main(int argc, char** argv) {
         std::set<uint64_t> fns;
         for (auto& r : ranges) fns.insert(r.start);
         std::ofstream out(argv[3]);
-        out << recomp::lift_prelude();
+        out << recomp::lift_prelude() << recomp::lift_declarations(fns);
         std::map<std::string, size_t> unsup;
         size_t lifted = 0, with_unsup = 0, total = 0, bytes = 0;
         for (auto& r : ranges) {
@@ -98,6 +99,83 @@ int main(int argc, char** argv) {
         for (auto& [k, n] : unsup) v.push_back({n, k});
         std::sort(v.rbegin(), v.rend());
         for (auto& [n, k] : v) std::printf("  %8zu %s\n", n, k.c_str());
+    }
+    if (argc > 2 && !std::strcmp(argv[2], "--indirect")) {
+        // How indirect control transfers look, to decide how to recompile them. Counts only.
+        auto kind = [](const recomp::Operand& o) -> std::string {
+            if (o.kind == recomp::OpKind::Reg) return "reg";
+            if (o.kind != recomp::OpKind::Mem) return "other";
+            if (o.base == recomp::kRip) return "[rip+disp]";
+            return o.index != recomp::kNoReg ? "[base+index*s+disp]" : "[base+disp]";
+        };
+        std::map<std::string, size_t> cls;
+        size_t table_blocks = 0, table_fns = 0, resolved = 0, entries = 0, unresolved_idiom = 0;
+        for (auto& r : ranges) {
+            recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+            bool fn_table = false;
+            resolved += fn.jump_tables.size();
+            for (auto& [ja, jt] : fn.jump_tables) entries += jt.targets.size();
+            for (auto& [a, b] : fn.blocks) {
+                for (auto& in : b.insns) {
+                    if ((in.flow == recomp::Flow::Call || in.flow == recomp::Flow::Jump) && !in.direct && in.nops)
+                        ++cls[in.mnemonic + " " + kind(in.ops[0])];
+                }
+                const recomp::Insn& last = b.insns.back();
+                if (last.flow == recomp::Flow::Jump && !last.direct && last.ops[0].kind == recomp::OpKind::Reg) {
+                    bool lea = false, movsxd = false, add = false;
+                    for (auto& in : b.insns) {
+                        lea |= in.mnemonic == "lea" && in.ops[1].base == recomp::kRip;
+                        movsxd |= in.mnemonic == "movsxd";
+                        add |= in.mnemonic == "add";
+                    }
+                    if (lea && movsxd && add) {
+                        ++table_blocks, fn_table = true;
+                        if (!fn.jump_tables.count(last.addr)) {
+                            ++unresolved_idiom;
+                            if (unresolved_idiom <= 3) std::printf("unresolved idiom at 0x%llx (fn 0x%llx)\n", (unsigned long long)last.addr, (unsigned long long)r.start);
+                        }
+                    }
+                }
+            }
+            table_fns += fn_table;
+        }
+        {
+            // Direct jumps that leave their function: to another function start, or into the middle of one (split cold code).
+            size_t to_start = 0, to_other = 0, inside_other = 0;
+            std::set<uint64_t> odd;
+            for (auto& r : ranges) {
+                recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+                for (uint64_t t : fn.tail_jumps) {
+                    if (starts.count(t)) { ++to_start; continue; }
+                    ++to_other, odd.insert(t);
+                    auto it = std::upper_bound(ranges.begin(), ranges.end(), t, [](uint64_t v, const recomp::FdeRange& x) { return v < x.start; });
+                    if (it != ranges.begin() && t < (it - 1)->start + (it - 1)->size) ++inside_other;
+                }
+            }
+            std::printf("tail jumps: %zu to a function start, %zu elsewhere (%zu distinct; %zu inside another function's range)\n",
+                        to_start, to_other, odd.size(), inside_other);
+        }
+        for (auto& [k, n] : cls) std::printf("%8zu %s\n", n, k.c_str());
+        std::printf("blocks ending in the lea/movsxd/add/jmp reg jump-table idiom: %zu (in %zu functions)\n", table_blocks, table_fns);
+        std::printf("jump tables resolved: %zu (%zu entries); idiom blocks left unresolved: %zu\n", resolved, entries, unresolved_idiom);
+    }
+    if (argc > 3 && !std::strcmp(argv[2], "--show-jmp")) {
+        // Prints the instructions leading to the first N `jmp reg` blocks (and the blocks that branch into them), to study
+        // the jump-table idiom. The text is derived from the game: look at it, do not paste it into the repo.
+        int left = std::atoi(argv[3]);
+        for (auto& r : ranges) {
+            recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+            for (auto& [a, b] : fn.blocks) {
+                const recomp::Insn& last = b.insns.back();
+                if (left <= 0 || !(last.flow == recomp::Flow::Jump && !last.direct && last.ops[0].kind == recomp::OpKind::Reg)) continue;
+                --left;
+                std::printf("-- fn 0x%llx block 0x%llx\n", (unsigned long long)r.start, (unsigned long long)a);
+                for (auto& [pa, pb] : fn.blocks)
+                    for (uint64_t sc : pb.succ)
+                        if (sc == a) for (auto& in : pb.insns) std::printf("   pred 0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+                for (auto& in : b.insns) std::printf("   0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+            }
+        }
     }
     if (argc > 2 && !std::strcmp(argv[2], "--hist")) {
         std::vector<std::pair<size_t, std::string>> v;

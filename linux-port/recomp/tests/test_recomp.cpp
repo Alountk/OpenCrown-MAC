@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "cfg.h"
+#include "lift.h"
 
 using namespace dcp::recomp;
 
@@ -48,6 +49,40 @@ static void test_decode() {
 
     const uint8_t bad[] = {0x0f};  // truncated
     CHECK(!decode(bad, sizeof bad, 0x1000, i));
+}
+
+static void test_jump_table() {
+    // switch (edi) { case 0: return 1; case 1: return 2; case 2: return 3; default: return 0; } as compilers emit it:
+    // cmp edi,2; ja default; lea rcx,[rip+table]; movsxd rax,[rcx+rdi*4]; add rax,rcx; jmp rax
+    const uint8_t code[] = {0x83, 0xff, 0x02, 0x77, 0x10, 0x48, 0x8d, 0x0d, 0x20, 0x00, 0x00, 0x00, 0x48, 0x63, 0x04, 0xb9,
+                            0x48, 0x01, 0xc8, 0xff, 0xe0,
+                            0x31, 0xc0, 0xc3,                          // 0x1015 default
+                            0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3,       // 0x1018 case 0
+                            0xb8, 0x02, 0x00, 0x00, 0x00, 0xc3,       // 0x101e case 1
+                            0xb8, 0x03, 0x00, 0x00, 0x00, 0xc3,       // 0x1024 case 2
+                            0xcc, 0xcc,
+                            0xec, 0xff, 0xff, 0xff, 0xf2, 0xff, 0xff, 0xff, 0xf8, 0xff, 0xff, 0xff};  // 0x102c table
+    Function f = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    CHECK(!f.has_bad_bytes && !f.has_indirect_jump);
+    CHECK(f.jump_tables.size() == 1 && f.jump_tables.count(0x1013));
+    const JumpTable& t = f.jump_tables.at(0x1013);
+    CHECK(t.table == 0x102c && t.targets.size() == 3);
+    CHECK(t.targets.size() == 3 && t.targets[0] == 0x1018 && t.targets[1] == 0x101e && t.targets[2] == 0x1024);
+    CHECK(f.blocks.size() == 6 && f.blocks.count(0x1018) && f.blocks.count(0x1024) && f.blocks.count(0x1015));
+    CHECK(f.blocks.at(0x1005).succ.size() == 3);  // the jump block reaches every case
+
+    // The same jump without the bounds check cannot be resolved: it stays an indirect jump.
+    const uint8_t unbounded[] = {0x48, 0x8d, 0x0d, 0x0b, 0x00, 0x00, 0x00, 0x48, 0x63, 0x04, 0xb9, 0x48, 0x01, 0xc8, 0xff, 0xe0};
+    Function u = discover_function(unbounded, sizeof unbounded, 0x2000, 0x2000, sizeof unbounded);
+    CHECK(u.has_indirect_jump && u.jump_tables.empty());
+}
+
+static void test_declarations() {
+    // Generated functions call each other in any order, so the output starts with one declaration per function.
+    const std::string d = lift_declarations({0x1000, 0x20f0});
+    CHECK(d.find("extern \"C\" void f_1000(Ctx*);\n") != std::string::npos);
+    CHECK(d.find("extern \"C\" void f_20f0(Ctx*);\n") != std::string::npos);
+    CHECK(lift_declarations({}).empty());
 }
 
 static void test_cfg() {
@@ -135,6 +170,8 @@ static void test_eh_frame() {
 int main() {
     test_decode();
     test_cfg();
+    test_jump_table();
+    test_declarations();
     test_eh_frame();
     if (g_fail) return 1;
     std::puts("recomp: all tests passed");
