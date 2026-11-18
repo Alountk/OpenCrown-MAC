@@ -21,6 +21,9 @@ LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions
 // Includes and helper macros every generated translation unit starts with.
 std::string lift_prelude();
 
+// One `extern "C" void f_<hex>(Ctx*);` line per function, for the top of every generated translation unit.
+std::string lift_declarations(const std::set<uint64_t>& functions);
+
 std::string function_name(uint64_t start);  // "f_<hex>"
 
 }  // namespace dcp::recomp

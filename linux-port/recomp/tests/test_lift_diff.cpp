@@ -533,6 +533,13 @@ const Case kCases[] = {
     {"vrsqrtps xmm0, xmm1", APPROX32}, {"vrsqrtps ymm0, ymm1", APPROX32}, {"vrsqrtps xmm0, xmmword ptr [rbx+16]", APPROX32},
     {"vrcpss xmm0, xmm1, xmm2", APPROX32}, {"vrcpss xmm0, xmm1, dword ptr [rbx+4]", APPROX32},
     {"vrsqrtss xmm0, xmm1, xmm2", APPROX32}, {"vrsqrtss xmm0, xmm1, dword ptr [rbx+4]", APPROX32},
+    // ---- switch statements compiled to jump tables: the table is part of the case's bytes ----
+{"and esi, 7\ncmp esi, 5\nja 9f\nlea rcx, [rip+2f]\nmovsxd rax, dword ptr [rcx+rsi*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
+{"and edx, 7\ncmp edx, 5\nja 9f\nlea rcx, [rip+2f]\nmovsxd rax, dword ptr [rcx+rdx*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
+{"mov eax, esi\nand eax, 7\ncmp eax, 5\nja 9f\nlea rcx, [rip+2f]\nmovsxd rax, dword ptr [rcx+rax*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
+{"and esi, 7\nmov eax, esi\ncmp esi, 5\nja 9f\nlea rcx, [rip+2f]\nmovsxd rax, dword ptr [rcx+rax*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
+{"and esi, 7\ncmp esi, 5\nvxorps xmm0, xmm0, xmm0\nmov r8d, 3\nja 9f\nlea rcx, [rip+2f]\nmovsxd rax, dword ptr [rcx+rsi*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
+{"and esi, 7\ncmp esi, 5\nja 9f\nlea rax, [rip+2f]\nmov rcx, rax\nmovsxd rax, dword ptr [rcx+rsi*4]\nadd rax, rcx\njmp rax\n2: .long 3f-2b, 4f-2b, 5f-2b, 6f-2b, 7f-2b, 8f-2b\n3: mov rdx, 11\njmp 9f\n4: mov rdx, 22\njmp 9f\n5: mov rdx, 33\njmp 9f\n6: mov rdx, 44\njmp 9f\n7: mov rdx, 55\njmp 9f\n8: mov rdx, 66\n9: xor eax, eax\nxor ecx, ecx", 0},
     // a counted loop (1..8 iterations: ecx is made non-zero first, otherwise dec wraps and it runs 2^32 times)
     {"and ecx, 7\ninc ecx\nxor eax, eax\n1: add rax, rcx\ndec ecx\njnz 1b", ALL},
     // flags set by one instruction and consumed several instructions later
@@ -598,7 +605,10 @@ int main() {
     if (!mkdtemp(dtv.data())) return std::puts("lift_diff: skipped (no temp dir)"), 0;
     (void)tmpl;
     const std::string dir = dtv.data();
-    auto cleanup = [&] { std::system(("rm -rf '" + dir + "'").c_str()); };
+    auto cleanup = [&] {
+        if (std::getenv("DCP_TEST_KEEP")) return (void)std::fprintf(stderr, "lift_diff: kept %s\n", dir.c_str());
+        std::system(("rm -rf '" + dir + "'").c_str());
+    };
 
     // 1. Assemble every case into a shared library so its bytes can be read back.
     {
@@ -629,7 +639,8 @@ int main() {
     std::vector<uint8_t> image(kNumCases * 0x400 + 0x400, 0xcc);
     std::string lifted = lift_prelude();
     lifted += "namespace dcp::rt { u64 dcp_img; void call_va(Ctx*, u64) { __builtin_trap(); } void call_ind(Ctx*, u64) "
-              "{ __builtin_trap(); } void jmp_ind(Ctx*, u64) { __builtin_trap(); } }\n";
+              "{ __builtin_trap(); } void jmp_ind(Ctx*, u64) { __builtin_trap(); } }\n"
+              "extern \"C\" void dcp_test_set_img(unsigned long long v) { dcp::rt::dcp_img = v; }\n";
     int lift_fail = 0;
     for (size_t i = 0; i < kNumCases; ++i) {
         const auto* s = static_cast<const uint8_t*>(dlsym(cases_lib, ("case_" + std::to_string(i) + "_s").c_str()));
@@ -644,6 +655,10 @@ int main() {
         std::copy(progs[i].bytes.begin(), progs[i].bytes.end(), image.begin() + long(va));
         Function fn = discover_function(image.data(), image.size(), 0, va, progs[i].bytes.size());
         LiftResult lr = lift_function(fn, {});
+        if (fn.has_indirect_jump) {  // every case is self-contained: an indirect jump here is one the CFG failed to resolve
+            ++lift_fail;
+            std::fprintf(stderr, "FAIL case %zu [%s]: unresolved indirect jump\n", i, kCases[i].text);
+        }
         if (fn.has_bad_bytes || !lr.unsupported.empty()) {
             ++lift_fail;
             std::fprintf(stderr, "FAIL case %zu [%s]: not liftable (%s)\n", i, kCases[i].text,
@@ -666,6 +681,10 @@ int main() {
     void* lib = dlopen((dir + "/lifted.so").c_str(), RTLD_NOW);
     if (!lib) return std::fprintf(stderr, "lift_diff: dlopen lifted: %s\n", dlerror()), cleanup(), 1;
 
+    // The lifted code addresses the image as dcp_img + guest address: point it at the buffer the cases were copied into, so
+    // data inside a case (jump tables) is readable exactly where the lifted code looks for it.
+    reinterpret_cast<void (*)(unsigned long long)>(dlsym(lib, "dcp_test_set_img"))(reinterpret_cast<unsigned long long>(image.data()));
+
     // 3. Run both versions from the same random state.
     auto* exec = static_cast<uint8_t*>(mmap(nullptr, 0x10000, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
     alignas(64) static uint8_t mem[512], stack[8192];
@@ -687,6 +706,7 @@ int main() {
             continue;
         }
         int bad = 0;
+        if (std::getenv("DCP_TEST_VERBOSE")) std::fprintf(stderr, "case %zu: %s\n", i, cs.text);
         for (int t = 0; t < 400 && bad < 2; ++t, ++trials_total) {
             Ctx in{};
             for (auto& r : in.r) r = rand_value();

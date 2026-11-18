@@ -1,8 +1,125 @@
 #include "cfg.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace dcp::recomp {
+
+namespace {
+
+// Recognises the jump-table idiom ending in `run.back()` (a `jmp R`). `run` holds the instructions decoded along the
+// straight-line path that led here, in order. Returns false when any part of the pattern is missing or the table does
+// not stay inside the function: the jump then stays an ordinary indirect jump.
+bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_t code_size, uint64_t code_base,
+                        JumpTable& out) {
+    auto gpr = [](const Operand& o) { return o.kind == OpKind::Reg && o.reg != kNoReg; };
+    const Insn& j = run.back();
+    if (!j.nops || !gpr(j.ops[0])) return false;
+    const int R = j.ops[0].reg;
+    int T = kNoReg, I = kNoReg, i = int(run.size()) - 2;
+    for (; i >= 0; --i) {  // add R, T
+        const Insn& x = run[size_t(i)];
+        if (x.mnemonic == "add" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == R && x.ops[0].bits == 64 && gpr(x.ops[1])) {
+            T = x.ops[1].reg;
+            break;
+        }
+    }
+    if (T == kNoReg) return false;
+    int movsxd_at = -1;
+    for (--i; i >= 0; --i) {  // movsxd R, dword ptr [T + I*4]
+        const Insn& x = run[size_t(i)];
+        if (x.mnemonic == "movsxd" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == R && x.ops[1].kind == OpKind::Mem &&
+            x.ops[1].base == T && x.ops[1].index != kNoReg && x.ops[1].scale == 4 && x.ops[1].disp == 0) {
+            I = x.ops[1].index;
+            movsxd_at = i;
+            break;
+        }
+    }
+    if (I == kNoReg) return false;
+    uint64_t table = 0;
+    bool have_lea = false;
+    int lea_at = -1;
+    for (--i; i >= 0; --i) {  // lea T, [rip + table], possibly copied through `mov T, T'` first
+        const Insn& x = run[size_t(i)];
+        if (x.mnemonic == "lea" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == T && x.ops[1].kind == OpKind::Mem &&
+            x.ops[1].base == kRip) {
+            table = x.ops[1].rip_target, have_lea = true, lea_at = i;
+            break;
+        }
+        if (x.mnemonic == "mov" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == T && gpr(x.ops[1]) && x.ops[1].bits == 64) {
+            T = x.ops[1].reg;
+            continue;
+        }
+        if (x.nops && gpr(x.ops[0]) && x.ops[0].reg == T && x.mnemonic != "cmp" && x.mnemonic != "test") return false;
+    }
+    if (!have_lea) return false;
+    // Bounds check: `cmp I, N` then `ja / jnbe default` before the table is touched. The compiler may schedule other
+    // instructions between the two as long as none of them writes the flags.
+    auto writes_flags = [](const std::string& m) {
+        if (m == "lea" || m == "push" || m == "pop" || m == "nop" || m == "not" || m == "xchg" || m == "bswap" || m == "cdq" ||
+            m == "cdqe" || m == "cqo" || m == "cwde" || m == "movbe")
+            return false;
+        if (m.compare(0, 3, "mov") == 0 || m.compare(0, 4, "cmov") == 0 || m.compare(0, 3, "set") == 0) return false;
+        if (m[0] == 'v') return m.find("comis") != std::string::npos || m.find("test") != std::string::npos;
+        return true;
+    };
+    int cmp_at = -1;
+    (void)lea_at;
+    for (int k = i - 1; k >= 1 && cmp_at < 0; --k) {
+        const Insn& x = run[size_t(k)];
+        if (x.mnemonic != "ja" && x.mnemonic != "jnbe") continue;
+        for (int m = k - 1; m >= 0; --m) {
+            const Insn& c = run[size_t(m)];
+            if (!writes_flags(c.mnemonic)) continue;
+            if (c.mnemonic == "cmp" && c.nops == 2 && gpr(c.ops[0]) && c.ops[1].kind == OpKind::Imm) cmp_at = m;
+            break;
+        }
+        break;
+    }
+    if (cmp_at < 0) return false;
+    // The index register used by movsxd must hold the value the bounds check tested: either it is that register, or a
+    // register-to-register mov copied it (before or after the cmp), and neither was changed afterwards.
+    {
+        const int C = run[size_t(cmp_at)].ops[0].reg;
+        auto writes = [&](const Insn& x, int r) {
+            return x.nops && gpr(x.ops[0]) && x.ops[0].reg == r && x.mnemonic != "cmp" && x.mnemonic != "test";
+        };
+        int cur = I;
+        bool passed = false, ok = false;
+        for (int k = movsxd_at - 1; k >= 0 && !ok; --k) {
+            const Insn& x = run[size_t(k)];
+            if (k == cmp_at) {
+                passed = true;
+                ok = cur == C;
+                continue;
+            }
+            if (x.mnemonic == "mov" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == cur && gpr(x.ops[1]) && x.ops[1].bits >= 32) {
+                cur = x.ops[1].reg;
+                ok = passed && cur == C;
+                continue;
+            }
+            if (writes(x, cur) || (passed && writes(x, C))) return false;
+        }
+        if (!ok) return false;
+    }
+    const Insn& c = run[size_t(cmp_at)];
+    const uint64_t mask = c.ops[0].bits >= 64 ? ~0ull : (1ull << c.ops[0].bits) - 1;
+    const uint64_t count = (uint64_t(c.ops[1].imm) & mask) + 1;
+    if (count > 4096) return false;
+    if (table < code_base || table + 4 * count > code_base + code_size) return false;
+    out = JumpTable{};
+    out.table = table;
+    for (uint64_t k = 0; k < count; ++k) {
+        int32_t rel;
+        std::memcpy(&rel, code + (table - code_base) + 4 * k, 4);
+        const uint64_t t = table + uint64_t(int64_t(rel));
+        if (t < code_base || t - code_base >= code_size) return false;
+        out.targets.push_back(t);
+    }
+    return true;
+}
+
+}  // namespace
 
 Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_base, uint64_t start, uint64_t size) {
     Function fn;
@@ -21,6 +138,7 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
     while (!work.empty()) {
         uint64_t a = work.back();
         work.pop_back();
+        std::vector<Insn> run;  // the straight-line path decoded from this entry, for jump-table recognition
         for (; !insns.count(a);) {
             if (a == end) {  // straight-line code reached the end exactly: a call to a noreturn function (no ud2 after it)
                 fn.fell_off_end = true;
@@ -38,13 +156,18 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
                 break;
             }
             insns[a] = in;
+            run.push_back(in);
             const uint64_t next = a + in.len;
             if (in.flow == Flow::Ret || in.flow == Flow::Trap) break;
             if (in.flow == Flow::Call) {
                 if (in.direct) fn.calls.insert(in.target);
             } else if (in.flow == Flow::Jump) {
+                JumpTable jt;
                 if (in.direct) push_target(in.target);
-                else fn.has_indirect_jump = true;
+                else if (recover_jump_table(run, code, code_size, code_base, jt)) {
+                    for (uint64_t t : jt.targets) push_target(t);
+                    fn.jump_tables.emplace(in.addr, std::move(jt));
+                } else fn.has_indirect_jump = true;
                 break;
             } else if (in.flow == Flow::CondJump) {
                 if (in.direct) push_target(in.target);
@@ -69,6 +192,10 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
             if (in.flow == Flow::Ret || in.flow == Flow::Trap) break;
             if (in.flow == Flow::Jump) {
                 if (in.direct && inside(in.target)) b.succ.push_back(in.target);
+                auto jt = fn.jump_tables.find(in.addr);
+                if (jt != fn.jump_tables.end())
+                    for (uint64_t t : jt->second.targets)
+                        if (std::find(b.succ.begin(), b.succ.end(), t) == b.succ.end()) b.succ.push_back(t);
                 break;
             }
             if (in.flow == Flow::CondJump) {
