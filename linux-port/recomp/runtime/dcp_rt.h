@@ -986,4 +986,55 @@ inline void fscale(Fpu& f) {
 
 }  // namespace x87
 
+// shld / shrd: double-precision shifts (the bits shifted in come from `s`). The count is masked to 5 (6 for 64-bit) bits; a count of 0
+// changes nothing, OF is defined for a count of 1, AF is undefined.
+template <class T> inline T shld(T d, T s, u64 cnt, Flags& f) {
+    const unsigned c = unsigned(cnt & (sizeof(T) == 8 ? 63 : 31));
+    if (c == 0) return d;
+    constexpr int B = bits_of<T>;
+    const u128 v = (u128(d) << B) | u128(s);
+    const T r = T((v << c) >> B);
+    f.cf = c <= unsigned(B) ? bool((u64(d) >> (B - c)) & 1) : false;
+    f.of = c == 1 ? (msb(r) != msb(d)) : false;
+    zsp(r, f);
+    f.af = false;
+    return r;
+}
+template <class T> inline T shrd(T d, T s, u64 cnt, Flags& f) {
+    const unsigned c = unsigned(cnt & (sizeof(T) == 8 ? 63 : 31));
+    if (c == 0) return d;
+    constexpr int B = bits_of<T>;
+    const u128 v = (u128(s) << B) | u128(d);
+    const T r = T(v >> c);
+    f.cf = bool((u64(d) >> (c - 1)) & 1);
+    f.of = c == 1 ? (msb(r) != msb(d)) : false;
+    zsp(r, f);
+    f.af = false;
+    return r;
+}
+
+// vptest: ZF = (a AND b) == 0, CF = (NOT a AND b) == 0; the other flags are cleared
+template <int B> inline void vptest(const Vec& a, const Vec& b, Flags& f) {
+    u64 both = 0, notb = 0;
+    for (int i = 0; i < B / 64; ++i) both |= a.q[i] & b.q[i], notb |= ~a.q[i] & b.q[i];
+    f.zf = both == 0, f.cf = notb == 0, f.of = f.sf = f.pf = f.af = false;
+}
+// vcvtdq2pd: the low B/64 int32 lanes of the source become doubles
+template <int B> inline Vec vpcvtdq2pd(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 64; ++i) setlane<u64>(r, i, fraw<double>(double(lane<i32>(a, i))));
+    return r;
+}
+// vmaskmovps / vmaskmovpd: a lane is read (or written) only when the top bit of its mask lane is set; masked-off loads give 0
+template <class U, int B> inline Vec vmaskload(const Vec& mask, u64 a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i)
+        if (msb(lane<U>(mask, i))) setlane<U>(r, i, ld<U>(a + i * sizeof(U)));
+    return r;
+}
+template <class U, int B> inline void vmaskstore(u64 a, const Vec& mask, const Vec& v) {
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i)
+        if (msb(lane<U>(mask, i))) st<U>(a + i * sizeof(U), lane<U>(v, i));
+}
+
 }  // namespace dcp::rt

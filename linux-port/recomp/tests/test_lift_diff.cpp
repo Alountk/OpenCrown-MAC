@@ -299,6 +299,23 @@ const Case kCases[] = {
     {"mov word ptr [rbx+34], 0x0b7f\nfldcw word ptr [rbx+34]\nfld qword ptr [rbx+8]\nfrndint\nfstp qword ptr [rbx+48]\nmov word ptr [rbx+34], 0x037f\nfldcw word ptr [rbx+34]", 0},
     {"fnstenv [rbx+32]\nfldenv [rbx+32]\nxor eax, eax\nmov qword ptr [rbx+32], rax\nmov qword ptr [rbx+40], rax\nmov qword ptr [rbx+48], rax\nmov qword ptr [rbx+56], rax", 0},
     {"fnclex\nfwait\nfnop", 0},
+    // vptest: only ZF and CF are compared (Rosetta 2 leaves OF/SF/AF/PF unchanged; the manuals clear them)
+    // ---- double shifts, mxcsr, non-temporal moves, vptest, masked moves, flags push / pop ----
+    {"shld rax, rbx, 5", ALL & ~(AF | OF)}, {"shld eax, ebx, 31", ALL & ~(AF | OF)}, {"shld rax, rbx, cl", ALL & ~(AF | OF)}, {"shld eax, ebx, cl", ALL & ~(AF | OF)}, {"shld ax, bx, 3", ALL & ~(AF | OF)},
+    {"shld rax, rbx, 1", ALL & ~AF}, {"shld rax, rbx, 0", ALL}, {"shld qword ptr [rbx+8], rcx, 7", ALL & ~(AF | OF)}, {"shld dword ptr [rbx+4], ecx, cl", ALL & ~(AF | OF)},
+    {"shrd rax, rbx, 5", ALL & ~(AF | OF)}, {"shrd eax, ebx, 31", ALL & ~(AF | OF)}, {"shrd rax, rbx, cl", ALL & ~(AF | OF)}, {"shrd eax, ebx, cl", ALL & ~(AF | OF)}, {"shrd ax, bx, 3", ALL & ~(AF | OF)},
+    {"shrd rax, rbx, 1", ALL & ~AF}, {"shrd rax, rbx, 0", ALL}, {"shrd qword ptr [rbx+8], rcx, 7", ALL & ~(AF | OF)}, {"shrd dword ptr [rbx+4], ecx, cl", ALL & ~(AF | OF)},
+    {"stmxcsr dword ptr [rbx+32]\nand dword ptr [rbx+32], 0x1f80", 0}, {"mov dword ptr [rbx+32], 0x1f80\nldmxcsr dword ptr [rbx+32]", 0},
+    {"vmovntdq xmmword ptr [rbx+32], xmm1", 0}, {"vmovntdq ymmword ptr [rbx+32], ymm1", 0}, {"vmovntps xmmword ptr [rbx+48], xmm2", 0},
+    {"vmovntpd ymmword ptr [rbx+32], ymm3", 0}, {"vmovntdqa xmm0, xmmword ptr [rbx+16]", 0}, {"movntdq xmmword ptr [rbx+32], xmm1", 0},
+    {"movntps xmmword ptr [rbx+32], xmm1", 0}, {"movnti qword ptr [rbx+32], rcx", 0}, {"movnti dword ptr [rbx+36], ecx", 0},
+    {"vptest xmm0, xmm1", ZF | CF}, {"vptest ymm0, ymm1", ZF | CF}, {"vptest xmm0, xmmword ptr [rbx+16]", ZF | CF}, {"vptest xmm2, xmm2", ZF | CF},
+    {"vcvtdq2pd xmm0, xmm1", 0}, {"vcvtdq2pd ymm0, xmm1", 0}, {"vcvtdq2pd xmm0, qword ptr [rbx+8]", 0}, {"vcvtdq2pd ymm0, xmmword ptr [rbx+16]", 0},
+    {"vmaskmovps xmm0, xmm1, xmmword ptr [rbx+16]", 0}, {"vmaskmovps ymm0, ymm1, ymmword ptr [rbx+32]", 0},
+    {"vmaskmovps xmmword ptr [rbx+32], xmm1, xmm2", 0}, {"vmaskmovps ymmword ptr [rbx+32], ymm1, ymm2", 0},
+    {"vmovlpd xmm0, xmm1, qword ptr [rbx+8]", 0}, {"vmovlpd qword ptr [rbx+16], xmm1", 0}, {"vmovhpd xmm0, xmm1, qword ptr [rbx+8]", 0},
+    {"vmovhpd qword ptr [rbx+16], xmm1", 0}, {"movlpd xmm0, qword ptr [rbx+8]", 0}, {"movhpd xmm0, qword ptr [rbx+8]", 0},
+    {"cmp rax, rbx\npushfq\npop rcx\nand ecx, 0x8d5", 0}, {"and eax, 0x8d5\nor eax, 2\npush rax\npopfq", ALL}, {"and eax, 0x8d5\nor eax, 2\npush rax\npopfq\nsetb cl\nsetz dl", 0},
     // ---- stack ----
     {"push rbx\npop rcx", 0}, {"push 0x12345678\npop rax", 0}, {"push -3\npop rdx", 0}, {"push qword ptr [rbx]\npop rax", 0},
     {"push rax\npush rcx\npop rdx\npop rsi", 0}, {"push rbx\npop qword ptr [rbx+8]", 0},
