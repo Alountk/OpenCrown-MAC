@@ -34,7 +34,7 @@ void guest_call_outside_host() {
     std::abort();
 }
 
-u64 run_guest(u64 fn, u64 arg, size_t stack_size) {
+u64 run_guest(u64 fn, u64 arg, size_t stack_size, u64 arg2, u64 arg3) {
     constexpr size_t kGuard = 1 << 14;  // one page of any size in use on macOS and Linux
     void* mem = mmap(nullptr, stack_size + kGuard, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (mem == MAP_FAILED) {
@@ -47,7 +47,7 @@ u64 run_guest(u64 fn, u64 arg, size_t stack_size) {
     sp -= 8;
     st<u64>(sp, 0);
     c.r[RSP] = sp;
-    c.r[RDI] = arg;
+    c.r[RDI] = arg, c.r[RSI] = arg2, c.r[RDX] = arg3;
     Ctx* const prev = g_current_ctx;
     g_current_ctx = &c;
     call_ind(&c, fn);

@@ -30,7 +30,15 @@
 #include "hle/confirm_button.h"
 #include "hle/skip_offers.h"
 #include "hle/own_camera.h"
+#ifndef __x86_64__
+#include "dcp_abi.h"
+#include "dcp_dispatch.h"
+#endif
+#ifdef __x86_64__
 #include "loader/cpu_compat.h"
+#else
+#include "dcp_guest.h"
+#endif
 #include "loader/elf.h"
 #include "loader/hle.h"
 #include "render/capture.h"
@@ -95,6 +103,7 @@ void print_addr(const char* what, uint64_t a) {
     else std::fprintf(stderr, "%s host 0x%llx", what, (unsigned long long)a);
 }
 
+#ifdef __x86_64__
 // Probes (DCP_PROBE=258e0,53c9b0*,...: hex eboot vaddrs, i.e. q.py addresses): an int3 on the first byte. A hit
 // logs the address, the frame clock, rdi/rsi (as a string when they point at text) and the caller. Plain entries fire
 // once; entries ending in '*' log every hit (re-armed after a single step; hits on other threads in that window are
@@ -245,6 +254,27 @@ void install_fault_handler() {  // every thread runs it on its own alternate sta
     for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP}) sigaction(sig, &sa, nullptr);
 }
 
+#else
+// arm64 (recompiled game code): there are no x86 registers to show and no instruction bytes to patch. A fault report names
+// the faulting data address; probes are not available.
+void install_probes(uint64_t) {}
+
+void on_fault(int sig, siginfo_t* si, void*) {
+    std::fprintf(stderr, "fault: signal %d at ", sig);
+    print_addr("address", reinterpret_cast<uint64_t>(si->si_addr));
+    std::fprintf(stderr, "\n");
+    finish(128 + sig);
+}
+
+void install_fault_handler() {
+    struct sigaction sa = {};
+    sa.sa_sigaction = on_fault;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP}) sigaction(sig, &sa, nullptr);
+}
+#endif
+
 void on_exit(int status) {
     std::fprintf(stderr, "game exited (%d); last stub calls:\n", status);
     for (const auto& s : recent_unimpl_calls()) std::fprintf(stderr, "    %s\n", s.c_str());
@@ -261,6 +291,7 @@ uint64_t g_entry, g_libc_start;
 
 void* game_thread(void*) {
     dcp::hle::install_signal_stack();
+#ifdef __x86_64__
     if (g_libc_start) {  // module_start(argc, argv, callback): runs libc's preinit/init arrays (guess: args unused)
         using Start = DCP_SYSV int (*)(uint64_t, void*, void*);
         int r = reinterpret_cast<Start>(g_libc_start)(0, nullptr, nullptr);
@@ -268,9 +299,35 @@ void* game_thread(void*) {
     }
     using Entry = DCP_SYSV void (*)(EntryParams*, void (*)());
     reinterpret_cast<Entry>(g_entry)(&g_params, reinterpret_cast<void (*)()>(&game_exit_cb));
+#else
+    // Recompiled code: the same two calls, each on its own guest register file and stack (the main thread's was 16 MiB here).
+    constexpr size_t kStack = 16u << 20;
+    if (g_libc_start) {
+        const uint64_t r = dcp::rt::run_guest(g_libc_start, 0, kStack);
+        std::fprintf(stderr, "libc module_start -> %d\n", int(r));
+    }
+    dcp::rt::run_guest(g_entry, reinterpret_cast<uint64_t>(&g_params), kStack, reinterpret_cast<uint64_t>(&game_exit_cb));
+#endif
     std::fprintf(stderr, "entry returned\n");
     return nullptr;
 }
+
+#ifndef __x86_64__
+// The recompiled modules (dcp_recompile output, linked in by the build): each defines dcp_register_<name>, which installs its
+// function table and image base. These weak definitions stand in when the generated code is not linked: the strong ones win.
+const char* g_unlinked = nullptr;
+extern "C" __attribute__((weak)) void dcp_register_eboot(unsigned long long, unsigned long long) { g_unlinked = "eboot"; }
+extern "C" __attribute__((weak)) void dcp_register_libc(unsigned long long, unsigned long long) { g_unlinked = "libc"; }
+
+void register_recompiled(const Loaded* m) {
+    g_unlinked = nullptr;
+    auto reg = m->name == "eboot" ? dcp_register_eboot : m->name == "libc" ? dcp_register_libc : nullptr;
+    if (reg) reg(reinterpret_cast<unsigned long long>(m->img.base), m->img.size);
+    if (!reg || g_unlinked)
+        throw std::runtime_error("this build has no recompiled code for module '" + m->name +
+                                 "': run dcp_recompile on it and link the output (see odd/tasks/arm64-static-recomp.md)");
+}
+#endif
 
 Loaded* load(const std::string& path, const std::string& name) {
     std::ifstream f(path, std::ios::binary);
@@ -409,7 +466,15 @@ int main(int argc, char** argv) {
             if (cfg.input_script.empty()) cfg.input_script = "\n";  // empty file = explicit idle script
         }
         dcp::hle::register_all(cfg);
-        if (!libc) register_hle("libc", "exit", reinterpret_cast<void*>(&on_exit_sysv));
+        if (!libc) {
+            register_hle("libc", "exit", reinterpret_cast<void*>(&on_exit_sysv));
+#ifndef __x86_64__
+            dcp::rt::register_host_function(reinterpret_cast<void*>(&on_exit_sysv), dcp::rt::thunk<&on_exit_sysv>);
+#endif
+        }
+#ifndef __x86_64__
+        dcp::rt::register_host_function(reinterpret_cast<void*>(&game_exit_cb), dcp::rt::thunk<&game_exit_cb>);
+#endif
 
         Binder binder;
         RelocStats rs;
@@ -434,12 +499,17 @@ int main(int argc, char** argv) {
                     rel.c_str(), bs.exported, bs.hle, bs.stubs, bs.data, bs.unknown, (unsigned long long)eb->info.entry);
         if (dry) return rs.unsupported.empty() ? 0 : 1;  // unknown NIDs are expected (unnamed NpToolkit2 C++ API)
 
+#ifdef __x86_64__
         const cpu_compat::Cpu cpu = cpu_compat::detect();
         std::printf("cpu: %s (avx %d, movbe %d, bmi1 %d, lzcnt %d)\n", cpu.brand.c_str(), cpu.avx, cpu.movbe, cpu.bmi1,
                     cpu.lzcnt);
         if (!cpu.avx)
             throw std::runtime_error("this CPU has no AVX (or the OS has it turned off); the game needs AVX: an Intel "
                                      "Core 2nd generation (Sandy Bridge) / AMD FX or newer");
+#else
+        for (Loaded* m : g_mods) register_recompiled(m);  // the recompiled code replaces the PS4's x86: no CPU feature to check
+        std::printf("running recompiled code natively (arm64)\n");
+#endif
         std::fflush(stdout);
         g_params = {1, 0, {"eboot.bin", nullptr, nullptr, nullptr}};
         g_entry = reinterpret_cast<uint64_t>(eb->img.base) + eb->info.entry;
@@ -447,9 +517,13 @@ int main(int argc, char** argv) {
         dcp::hle::install_signal_stack();
         install_fault_handler();
         install_probes(reinterpret_cast<uint64_t>(eb->img.base));
+#ifdef __x86_64__
+        // These hooks patch x86 bytes in the eboot. With recompiled code they have nothing to patch: disabled on arm64 for now
+        // (they come back as overrides of recompiled functions, see odd/tasks/arm64-static-recomp.md T5f).
         dcp::skip_offers::install(eb->img.base);  // story / tutorial skip questions for every new hero (skip_offers.h)
         dcp::confirm_button::install(eb->img.base);  // DCP_CONFIRM=circle: Japanese button layout (confirm_button.h)
         dcp::own_camera::install(eb->img.base);   // separate cameras online
+#endif
 #ifndef DCP_HAVE_RENDER
         if (render) throw std::runtime_error("--render needs a build with -DDCP_RENDER=ON (the default)");
 #else
@@ -467,8 +541,10 @@ int main(int argc, char** argv) {
         if (render && ((window && input_path.empty()) || touch_test)) input = install_sdl_input(input_dir, touch_test);
         if (input && !touch_test) dcp::hle::ime_set_host(true);  // the render loop draws the name-entry box (ime_box.h)
 #endif
+#ifdef __x86_64__
         cpu_compat::install(eb->img.base, cpu_compat::kEboot, cpu);
         if (libc) cpu_compat::install(libc->img.base, cpu_compat::kLibc, cpu);
+#endif
         // Own thread so the game gets a large stack (PS4 main thread: guess 8 MiB; 16 MiB here). One mapping with the
         // guard page at the bottom only, so frames > 4 KiB (game code has no stack probes) are fine.
         pthread_t t;

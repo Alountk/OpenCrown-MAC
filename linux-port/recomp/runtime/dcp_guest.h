@@ -14,8 +14,8 @@ namespace dcp::rt {
 u64 call_guest(u64 fn, u64 a0 = 0, u64 a1 = 0, u64 a2 = 0, u64 a3 = 0, u64 a4 = 0, u64 a5 = 0);
 
 // Runs guest code from the host on the calling thread (a guest thread's entry point, module start, main): a fresh register
-// file and a private guest stack of `stack_size` bytes, `fn(arg)`, returns rax.
-u64 run_guest(u64 fn, u64 arg, size_t stack_size);
+// file and a private guest stack of `stack_size` bytes, `fn(arg, arg2, arg3)`, returns rax.
+u64 run_guest(u64 fn, u64 arg, size_t stack_size, u64 arg2 = 0, u64 arg3 = 0);
 
 // Typed form for host code that holds a guest function pointer (`void* (*)(void*)`, `void (*)(uint16_t, ..., void*)`): calls it
 // the way call_guest / run_guest would, picking by where it is called from. Integer, enum and pointer arguments and results
