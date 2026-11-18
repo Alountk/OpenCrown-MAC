@@ -72,6 +72,20 @@ static void test_byte_registers() {
     CHECK(decode(bh, sizeof bh, 0, i) && i.ops[0].reg == 3 && i.ops[0].high8);
 }
 
+static void test_rep_prefix_kind() {
+    Insn i;
+    const uint8_t plain[] = {0xa4};                 // movsb
+    CHECK(decode(plain, sizeof plain, 0, i) && i.rep_kind == 0);
+    const uint8_t rep[] = {0xf3, 0xa4};             // rep movsb
+    CHECK(decode(rep, sizeof rep, 0, i) && i.rep_kind == 1 && i.mnemonic == "movsb");
+    const uint8_t repe[] = {0xf3, 0xa6};            // repe cmpsb
+    CHECK(decode(repe, sizeof repe, 0, i) && i.rep_kind == 1 && i.mnemonic == "cmpsb");
+    const uint8_t repne[] = {0xf2, 0xae};           // repne scasb
+    CHECK(decode(repne, sizeof repne, 0, i) && i.rep_kind == 2 && i.mnemonic == "scasb");
+    const uint8_t stos[] = {0xf3, 0x48, 0xab};      // rep stosq
+    CHECK(decode(stos, sizeof stos, 0, i) && i.rep_kind == 1 && i.mnemonic == "stosq");
+}
+
 static void test_jump_table() {
     // switch (edi) { case 0: return 1; case 1: return 2; case 2: return 3; default: return 0; } as compilers emit it:
     // cmp edi,2; ja default; lea rcx,[rip+table]; movsxd rax,[rcx+rdi*4]; add rax,rcx; jmp rax
@@ -222,6 +236,7 @@ int main() {
     test_decode();
     test_cfg();
     test_byte_registers();
+    test_rep_prefix_kind();
     test_jump_table();
     test_hoisted_table_base();
     test_declarations();

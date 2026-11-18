@@ -36,6 +36,7 @@ struct Insn {
     Operand ops[4];
     uint8_t nops = 0;        // visible operands, Intel order (destination first)
     bool lock = false, rep = false;
+    uint8_t rep_kind = 0;    // string instructions: 1 = rep / repe (F3), 2 = repne (F2), 0 = none
     std::string mnemonic;    // lower case, e.g. "add", "vaddps"
     std::string text;        // Intel syntax, for diagnostics and tests
 };
