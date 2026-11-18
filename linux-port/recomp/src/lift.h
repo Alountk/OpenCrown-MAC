@@ -16,18 +16,20 @@ struct LiftResult {
 };
 
 // `functions` holds the start addresses of every recompiled function: direct calls to them become direct C++ calls.
-LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions);
+// `module` names the module the function belongs to ("" = the only one): its symbols are f_<module>_<hex> and it addresses its
+// image through dcp_img_<module>, so several modules can share one program.
+LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module = "");
 
 // Includes and helper macros every generated translation unit starts with.
 std::string lift_prelude();
 
 // One `extern "C" void f_<hex>(Ctx*);` line per function, for the top of every generated translation unit.
-std::string lift_declarations(const std::set<uint64_t>& functions);
+std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module = "");
 
 // The sorted function table and `dcp_register(image_base, image_size)`, which installs it in the dispatch runtime. Goes after
 // lift_prelude() and lift_declarations() in one translation unit.
-std::string lift_function_table(const std::set<uint64_t>& functions);
+std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module = "");
 
-std::string function_name(uint64_t start);  // "f_<hex>"
+std::string function_name(uint64_t start, const std::string& module = "");  // "f_<hex>" or "f_<module>_<hex>"
 
 }  // namespace dcp::recomp

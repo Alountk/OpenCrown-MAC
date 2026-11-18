@@ -4,15 +4,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
+#include <vector>
 
 namespace dcp::rt {
 
 u64 dcp_img = 0;
 
 namespace {
-u64 g_size = 0;
-const FnEntry* g_table = nullptr;
-size_t g_count = 0;
+struct Module {
+    u64 base = 0, size = 0;
+    const FnEntry* table = nullptr;
+    size_t count = 0;
+};
+Module g_first;                // set_image / set_function_table
+std::vector<Module> g_more;    // add_module; written before guest code runs, read-only afterwards
 
 void default_foreign(Ctx*, u64 target) {
     std::fprintf(stderr, "dcp: call to 0x%llx, which is not a recompiled function\n", static_cast<unsigned long long>(target));
@@ -29,17 +34,25 @@ void dispatch(Ctx* c, u64 target) {
 }
 }  // namespace
 
-void set_image(u64 base, u64 size) { dcp_img = base, g_size = size; }
-void set_function_table(const FnEntry* sorted, size_t count) { g_table = sorted, g_count = count; }
+void set_image(u64 base, u64 size) { dcp_img = base, g_first.base = base, g_first.size = size; }
+void set_function_table(const FnEntry* sorted, size_t count) { g_first.table = sorted, g_first.count = count; }
+void add_module(u64 base, u64 size, const FnEntry* sorted, size_t count) { g_more.push_back({base, size, sorted, count}); }
 void register_host_function(const void* host_fn, Fn thunk) { g_host[reinterpret_cast<u64>(host_fn)] = thunk; }
 void set_foreign_handler(ForeignHandler handler) { g_foreign = handler ? handler : default_foreign; }
 
-Fn find_function(u64 target) {
-    const u64 off = target - dcp_img;  // wraps for targets below the image, which the size check then rejects
-    if (off >= g_size) return nullptr;
-    const FnEntry* end = g_table + g_count;
-    const FnEntry* it = std::lower_bound(g_table, end, off, [](const FnEntry& e, u64 v) { return e.off < v; });
+static Fn lookup(const Module& m, u64 target) {
+    const u64 off = target - m.base;  // wraps for targets below the image, which the size check then rejects
+    if (off >= m.size) return nullptr;
+    const FnEntry* end = m.table + m.count;
+    const FnEntry* it = std::lower_bound(m.table, end, off, [](const FnEntry& e, u64 v) { return e.off < v; });
     return it != end && it->off == off ? it->fn : nullptr;
+}
+
+Fn find_function(u64 target) {
+    if (Fn f = lookup(g_first, target)) return f;
+    for (const Module& m : g_more)
+        if (Fn f = lookup(m, target)) return f;
+    return nullptr;
 }
 
 void call_va(Ctx* c, u64 guest_va) { dispatch(c, dcp_img + guest_va); }
