@@ -51,6 +51,27 @@ static void test_decode() {
     CHECK(!decode(bad, sizeof bad, 0x1000, i));
 }
 
+static void test_byte_registers() {
+    // 8-bit registers beyond bh: spl bpl sil dil are 4..7 (REX encoding) and r8b..r15b are 8..15, not their enum order.
+    Insn i;
+    const uint8_t sil[] = {0x40, 0x80, 0xfe, 0x03};      // cmp sil, 3
+    CHECK(decode(sil, sizeof sil, 0, i) && i.ops[0].reg == 6 && !i.ops[0].high8 && i.ops[0].bits == 8);
+    const uint8_t dil[] = {0x40, 0xb7, 0x05};            // mov dil, 5
+    CHECK(decode(dil, sizeof dil, 0, i) && i.ops[0].reg == 7);
+    const uint8_t spl[] = {0x40, 0xb4, 0x05};            // mov spl, 5
+    CHECK(decode(spl, sizeof spl, 0, i) && i.ops[0].reg == 4 && !i.ops[0].high8);
+    const uint8_t bpl[] = {0x40, 0xb5, 0x05};            // mov bpl, 5
+    CHECK(decode(bpl, sizeof bpl, 0, i) && i.ops[0].reg == 5 && !i.ops[0].high8);
+    const uint8_t r8b[] = {0x41, 0xb0, 0x05};            // mov r8b, 5
+    CHECK(decode(r8b, sizeof r8b, 0, i) && i.ops[0].reg == 8);
+    const uint8_t r15b[] = {0x41, 0xb7, 0x05};           // mov r15b, 5
+    CHECK(decode(r15b, sizeof r15b, 0, i) && i.ops[0].reg == 15);
+    const uint8_t ah[] = {0xb4, 0x05};                   // mov ah, 5: still the high byte of rax
+    CHECK(decode(ah, sizeof ah, 0, i) && i.ops[0].reg == 0 && i.ops[0].high8);
+    const uint8_t bh[] = {0xb7, 0x05};                   // mov bh, 5: high byte of rbx
+    CHECK(decode(bh, sizeof bh, 0, i) && i.ops[0].reg == 3 && i.ops[0].high8);
+}
+
 static void test_jump_table() {
     // switch (edi) { case 0: return 1; case 1: return 2; case 2: return 3; default: return 0; } as compilers emit it:
     // cmp edi,2; ja default; lea rcx,[rip+table]; movsxd rax,[rcx+rdi*4]; add rax,rcx; jmp rax
@@ -175,6 +196,7 @@ static void test_eh_frame() {
 int main() {
     test_decode();
     test_cfg();
+    test_byte_registers();
     test_jump_table();
     test_declarations();
     test_eh_frame();

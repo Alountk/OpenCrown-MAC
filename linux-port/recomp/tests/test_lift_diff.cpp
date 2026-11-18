@@ -137,6 +137,19 @@ const Case kCases[] = {
     {"xchg rax, rbx", 0}, {"xchg ecx, edx", 0}, {"xchg qword ptr [rbx], rcx", 0}, {"xchg byte ptr [rbx+1], dl", 0},
     {"bswap eax", 0}, {"bswap rcx", 0}, {"movbe eax, dword ptr [rbx]", 0}, {"movbe qword ptr [rbx+8], rcx", 0},
     {"movbe ax, word ptr [rbx+2]", 0},
+    // ---- 8-bit registers that need a REX prefix: sil dil bpl and r8b..r15b ----
+    {"mov sil, bl", 0}, {"mov dil, 5", 0}, {"mov bpl, cl", 0}, {"mov r8b, al", 0}, {"mov r9b, 0x7f", 0}, {"mov r15b, dl", 0},
+    {"mov al, sil", 0}, {"mov cl, r10b", 0}, {"movzx eax, dil", 0}, {"movzx rax, r11b", 0}, {"movsx eax, sil", 0},
+    {"movsx rcx, r14b", 0}, {"add sil, dil", ALL}, {"add r8b, r9b", ALL}, {"sub r10b, 7", ALL}, {"cmp sil, 3", ALL},
+    {"cmp r12b, bl", ALL}, {"test dil, dil", NOAF}, {"test r13b, 0x80", NOAF}, {"xor sil, sil", NOAF}, {"inc dil", ALL & ~CF},
+    {"neg r11b", ALL}, {"not sil", 0}, {"setz r9b", 0}, {"cmp rax, rbx\nsetb sil", 0}, {"mov byte ptr [rbx+3], sil", 0},
+    {"mov r8b, byte ptr [rbx+9]", 0}, {"shl sil, 2", ALL & ~(AF | OF)}, {"xchg sil, r8b", 0},
+    // ---- the extended registers r8..r15 at every width, as operands and in addresses ----
+    {"mov r9d, r10d", 0}, {"mov r13, r14", 0}, {"mov r11w, r12w", 0}, {"add r11w, r12w", ALL}, {"add r9d, r15d", ALL},
+    {"sub r8, r13", ALL}, {"lea r8, [r9+r10*4+8]", 0}, {"lea r12d, [r13+r14*2]", 0}, {"imul r10, r11", CF | OF},
+    {"mov r15, qword ptr [rbx+8]", 0}, {"mov qword ptr [rbx+16], r14", 0}, {"movzx r9d, word ptr [rbx+6]", 0},
+    {"movsxd r10, r11d", 0}, {"shl r12, 3", ALL & ~(AF | OF)}, {"cmovz r8, r15", 0}, {"xchg r9, r10", 0}, {"bswap r13d", 0},
+    {"push r12\npop r15", 0}, {"mov r8, rbx\nand r9d, 7\nmov rax, qword ptr [r8+r9*8]", 0},
     // ---- stack ----
     {"push rbx\npop rcx", 0}, {"push 0x12345678\npop rax", 0}, {"push -3\npop rdx", 0}, {"push qword ptr [rbx]\npop rax", 0},
     {"push rax\npush rcx\npop rdx\npop rsi", 0}, {"push rbx\npop qword ptr [rbx+8]", 0},
