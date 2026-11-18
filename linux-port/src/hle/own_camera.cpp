@@ -1,4 +1,5 @@
 // Separate cameras in online adventures.
+#include "platform/compat.h"
 #include "own_camera.h"
 
 #include <chrono>

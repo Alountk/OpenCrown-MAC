@@ -24,6 +24,7 @@
 #include <ucontext.h>
 #include <unistd.h>
 
+#include "platform/compat.h"
 #include "hle/hle.h"
 #include "hle/ime.h"
 #include "hle/confirm_button.h"
@@ -113,8 +114,12 @@ void patch_byte(uint64_t a, uint8_t v) {  // probes sit in r-x text; x86 needs n
 
 // Copies n bytes at host address a without faulting (process_vm_readv on ourselves fails on unmapped memory).
 bool safe_read(uint64_t a, void* out, size_t n) {
+#ifdef __APPLE__
+    return dcp::platform::safe_read(a, out, n);
+#else
     iovec local{out, n}, remote{reinterpret_cast<void*>(a), n};
     return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == ssize_t(n);
+#endif
 }
 
 void install_probes(uint64_t base) {
@@ -144,7 +149,11 @@ std::string text_at(uint64_t a) {  // printable ASCII string at a readable addre
     return r.size() >= 2 ? " '" + r + "'" : "";
 }
 
+#ifdef __APPLE__
+using Regs = GRegs;  // see platform/compat.h
+#else
 using Regs = greg_t*;  // ucontext general registers (REG_RIP, REG_RAX, ...)
+#endif
 #define R64(r) (unsigned long long)c[REG_##r]
 
 bool handle_probe(Regs c) {
@@ -182,7 +191,11 @@ const char* sig_name(int sig) {
 }
 
 void on_fault(int sig, siginfo_t* si, void* ucv) {
+#ifdef __APPLE__
+    Regs c(ucv);
+#else
     Regs c = static_cast<ucontext_t*>(ucv)->uc_mcontext.gregs;
+#endif
     if (sig == SIGTRAP && t_rearm) {  // single step after a repeating probe
         {
             std::lock_guard<std::mutex> lk(g_probe_lock);

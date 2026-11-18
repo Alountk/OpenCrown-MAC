@@ -20,6 +20,7 @@
 // first-frame build, so the next frame shows a fresh dialog whose 0x3cc text is ours. Relay Y clears both. Every
 // relay is plain bytes, checked with capstone (DCP_SKIP_DUMP=1 prints them); no register but rax is touched where
 // rax is dead (the lookup returns in rax; B and Y reload it before use in the original code).
+#include "platform/compat.h"
 #include "skip_offers.h"
 
 #include <cstdio>

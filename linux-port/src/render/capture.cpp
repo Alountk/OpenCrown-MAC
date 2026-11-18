@@ -1,6 +1,7 @@
 // Hooks on the game's render wrappers (addresses: notes/map/render_cmds.md s3, s8). Each hook is a 5-byte jmp to a
 // relay that calls an observer with the original argument registers, then runs the displaced prologue and jumps
 // back: the game's own code still runs unchanged (it keeps writing its PM4, which the GNM stub ignores).
+#include "platform/compat.h"
 #include "capture.h"
 
 #include <atomic>
@@ -66,7 +67,7 @@ bool readable(uint64_t a, uint64_t n) {
     for (uint64_t x = lo; x < hi;) {  // 1 MiB per call
         ++g_vq_calls;
         uint64_t e = hi - x > (1u << 20) ? x + (1u << 20) : hi;
-        unsigned char vec[256];
+        dcp_mincore_t vec[256];
         if (mincore(reinterpret_cast<void*>(x), e - x, vec) != 0) return false;
         x = e;
     }

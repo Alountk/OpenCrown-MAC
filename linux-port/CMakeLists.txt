@@ -8,8 +8,8 @@ endif()
 
 # Linux / Steam Deck build. Separate from the Windows tree (../port): own sources, own build, no shared files.
 # Targets are added here as each part of src/ is ported (see README.md, Phase 1).
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  message(FATAL_ERROR "linux-port builds on Linux only (WSL2 works); the Windows build is ../port")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "^(Linux|Darwin)$")
+  message(FATAL_ERROR "linux-port builds on Linux or macOS only (WSL2 works); the Windows build is ../port")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,6 +18,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 add_compile_options(-Wall -Wextra)
+if(APPLE)
+  # ucontext.h needs _XOPEN_SOURCE on macOS; _DARWIN_C_SOURCE keeps the BSD/Mach extras visible.
+  add_compile_definitions(_XOPEN_SOURCE=700 _DARWIN_C_SOURCE)
+endif()
 # Release files must not carry this PC's paths (mbedTLS and assert() put __FILE__ into the binary): the source tree,
 # the build dir and every FETCHCONTENT_SOURCE_DIR_* override are mapped to neutral names.
 set(DCP_PREFIX_MAPS "${CMAKE_CURRENT_SOURCE_DIR}=." "${CMAKE_BINARY_DIR}=build")
@@ -227,3 +231,37 @@ add_test(NAME texwatch COMMAND test_texwatch)
 add_executable(test_update tests/test_update.cpp)  # launcher self-updater: logic + HTTP client on loopback only
 target_link_libraries(test_update PRIVATE dcp_net)
 add_test(NAME update COMMAND test_update)
+
+# Static recompiler (host tool, runs on the user's machine against their own dump; see ../odd/tasks/arm64-static-recomp.md).
+# Independent of the target architecture: it only decodes x86-64 bytes.
+option(DCP_RECOMP "Build the static recompiler" ON)
+if(DCP_RECOMP)
+  FetchContent_Declare(zydis
+    GIT_REPOSITORY https://github.com/zyantific/zydis.git
+    GIT_TAG v4.1.0
+    GIT_SHALLOW TRUE)
+  set(ZYDIS_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_DOXYGEN OFF CACHE BOOL "" FORCE)
+  set(ZYDIS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(zydis)
+  add_library(dcp_recomp STATIC recomp/src/decoder.cpp recomp/src/cfg.cpp recomp/src/lift.cpp)
+  target_include_directories(dcp_recomp PUBLIC recomp/src)
+  target_link_libraries(dcp_recomp PUBLIC Zydis)
+  add_executable(test_recomp recomp/tests/test_recomp.cpp)
+  target_link_libraries(test_recomp PRIVATE dcp_recomp)
+  add_test(NAME recomp COMMAND test_recomp)
+  # Differential test of the lifter against real x86-64 execution: needs an x86-64 host (native or Rosetta 2).
+  if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR (NOT APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64"))
+    add_executable(test_lift_diff recomp/tests/test_lift_diff.cpp)
+    target_include_directories(test_lift_diff PRIVATE recomp/runtime)
+    target_link_libraries(test_lift_diff PRIVATE dcp_recomp ${CMAKE_DL_LIBS})
+    target_compile_definitions(test_lift_diff PRIVATE
+      DCP_TEST_CXX="${CMAKE_CXX_COMPILER}"
+      DCP_TEST_RT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/recomp/runtime"
+      DCP_TEST_ARCH="$<IF:$<BOOL:${APPLE}>,-arch x86_64 -isysroot ${CMAKE_OSX_SYSROOT},>")
+    add_test(NAME lift_diff COMMAND test_lift_diff)
+  endif()
+  add_executable(dcp_scan recomp/tools/dcp_scan.cpp)
+  target_link_libraries(dcp_scan PRIVATE dcp_recomp dcp_loader)
+endif()

@@ -79,19 +79,25 @@ extern "C" DCP_SYSV uint64_t dcp_unimpl_handler(uint64_t a, uint64_t b, uint64_t
 }
 extern "C" void dcp_unimpl_tramp();
 // Realign the stack and pass eax (import index) as the 7th SysV argument (on the stack).
-asm(R"(
-    .text
-    .globl dcp_unimpl_tramp
-dcp_unimpl_tramp:
-    push %rbp
-    mov %rsp, %rbp
-    and $-16, %rsp
-    sub $8, %rsp
-    push %rax
-    call dcp_unimpl_handler@PLT
-    leave
-    ret
-)");
+#ifdef __APPLE__
+#define DCP_ASM_SYM(n) "_" #n  // Mach-O prefixes C symbols with an underscore and has no PLT
+#define DCP_ASM_CALL(n) "_" #n
+#else
+#define DCP_ASM_SYM(n) #n
+#define DCP_ASM_CALL(n) #n "@PLT"
+#endif
+asm("    .text\n"
+    "    .globl " DCP_ASM_SYM(dcp_unimpl_tramp) "\n"
+    DCP_ASM_SYM(dcp_unimpl_tramp) ":\n"
+    "    push %rbp\n"
+    "    mov %rsp, %rbp\n"
+    "    and $-16, %rsp\n"
+    "    sub $8, %rsp\n"
+    "    push %rax\n"
+    "    call " DCP_ASM_CALL(dcp_unimpl_handler) "\n"
+    "    leave\n"
+    "    ret\n");
+
 
 namespace dcp::loader {
 namespace {

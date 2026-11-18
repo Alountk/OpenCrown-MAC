@@ -1,4 +1,5 @@
 // Minimal WebSocket (ws.h).
+#include "platform/compat.h"
 #include "net/ws.h"
 
 #include "net/tls.h"

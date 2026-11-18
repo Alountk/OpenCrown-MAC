@@ -11,6 +11,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include "platform/compat.h"
 #include "common.h"
 #include "render/capture.h"
 
@@ -22,16 +23,24 @@ std::atomic<uint64_t> g_flips{0}, g_submits{0}, g_labels{0};
 // The DCB start is readable (one probe byte, without faulting): stale / garbage submits are skipped.
 bool mapped(const void* p) {
     uint8_t b;
+#ifdef __APPLE__
+    return dcp::platform::safe_read(reinterpret_cast<uint64_t>(p), &b, 1);
+#else
     iovec local{&b, 1}, remote{const_cast<void*>(p), 1};
     if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == 1) return true;
     return errno == ENOSYS || errno == EPERM;  // syscall filtered: assume mapped
+#endif
 }
 
 // Checked write: process_vm_writev on ourselves fails (EFAULT) on unmapped or read-only memory instead of faulting,
 // so a label address that is unmapped / read-only (stale or garbage packet) is skipped.
 void mem_write(uint64_t addr, uint64_t value, int bytes) {
+#ifdef __APPLE__
+    ssize_t r = addr && dcp::platform::safe_write(addr, &value, size_t(bytes)) ? ssize_t(bytes) : -1;
+#else
     iovec local{&value, size_t(bytes)}, remote{reinterpret_cast<void*>(addr), size_t(bytes)};
     ssize_t r = addr ? process_vm_writev(getpid(), &local, 1, &remote, 1, 0) : -1;
+#endif
     if (r < 0 && addr && (errno == ENOSYS || errno == EPERM)) {  // syscall filtered (some sandboxes): write unchecked
         std::memcpy(reinterpret_cast<void*>(addr), &value, size_t(bytes));
         r = bytes;
