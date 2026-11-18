@@ -5,7 +5,8 @@
 //
 //   void sceFoo(Ctx* c) = thunk<hle_foo>;  // reads rdi/rsi/... from c, calls hle_foo, writes rax, pops the return address
 //
-// Supported: integers, enums, bool, pointers, float and double, as arguments and results. No structs by value, no varargs.
+// Supported: integers, enums, bool, pointers, float and double, as arguments and results; and, as arguments, any class with a
+// static from_guest_word(u64) (the HLE's wrapper for guest function pointers). No structs by value, no varargs.
 #pragma once
 #include <tuple>
 #include <type_traits>
@@ -36,10 +37,11 @@ template <class T> T next_arg(Cursor& a) {
         std::memcpy(&v, &raw, sizeof v);
         return v;
     } else {
-        static_assert(std::is_integral_v<T> || std::is_pointer_v<T> || std::is_enum_v<T>,
-                      "the ABI bridge handles integers, enums, bool, pointers, float and double only");
+        static_assert(std::is_integral_v<T> || std::is_pointer_v<T> || std::is_enum_v<T> || requires(u64 w) { T::from_guest_word(w); },
+                      "the ABI bridge handles integers, enums, bool, pointers, float, double and types with from_guest_word(u64)");
         const u64 raw = a.gp < 6 ? a.c->r[kIntRegs[a.gp++]] : a.next_stack();
-        if constexpr (std::is_pointer_v<T>) return reinterpret_cast<T>(raw);
+        if constexpr (requires { T::from_guest_word(raw); }) return T::from_guest_word(raw);  // e.g. a guest callback wrapper
+        else if constexpr (std::is_pointer_v<T>) return reinterpret_cast<T>(raw);
         else if constexpr (std::is_same_v<T, bool>) return (raw & 0xff) != 0;  // only the low byte of a bool is defined
         else if constexpr (std::is_enum_v<T>) return static_cast<T>(static_cast<std::underlying_type_t<T>>(raw));
         else return static_cast<T>(raw);  // the upper bits of a narrower integer are garbage: truncate

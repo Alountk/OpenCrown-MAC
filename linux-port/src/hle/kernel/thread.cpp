@@ -18,8 +18,8 @@
 namespace dcp::hle {
 namespace {
 
-using SysvEntry = DCP_SYSV void* (*)(void*);
-using SysvDtor = DCP_SYSV void (*)(void*);
+using SysvEntry = GuestFn<void*(void*)>;
+using SysvDtor = GuestFn<void(void*)>;
 
 struct Attr {
     uint64_t stacksize = 0x100000;  // guess: SCE default 1 MiB
@@ -61,6 +61,9 @@ void* thread_main(void* p) {
     install_signal_stack();
     jmp_buf exit_jmp;
     t_exit_jmp = &exit_jmp;
+#ifndef __x86_64__
+    rt::g_thread_guest_stack = size_t(t->attr.stacksize);  // the guest runs on its own stack, as large as it asked for
+#endif
     if (setjmp(exit_jmp) == 0) t->ret = t->entry(t->arg);
     t_exit_jmp = nullptr;
     for (int k = 0; k < kMaxKeys; ++k)  // POSIX key destructors (one pass)
@@ -133,7 +136,7 @@ DCP_SYSV int32_t scePthreadCreate(Thread** out, Attr** attr, SysvEntry entry, vo
     t->started = pthread_create(&t->h, &pa, thread_main, t) == 0;
     pthread_attr_destroy(&pa);
     std::fprintf(stderr, "HLE scePthreadCreate: '%s' entry %p arg %p stack 0x%llx prio %d affinity 0x%llx\n", t->name,
-                 reinterpret_cast<void*>(entry), arg, (unsigned long long)t->attr.stacksize, t->attr.prio,
+                 guest_fn_ptr(entry), arg, (unsigned long long)t->attr.stacksize, t->attr.prio,
                  (unsigned long long)t->attr.affinity);
     return t->started ? kOk : kErr(kEAGAIN);
 }
@@ -195,7 +198,7 @@ DCP_SYSV int32_t scePthreadSetspecific(int32_t key, const void* v) {
 }
 
 std::recursive_mutex g_once_mu;  // one lock for all once-blocks: init routines are rare and short
-DCP_SYSV int32_t scePthreadOnce(int32_t* once, DCP_SYSV void (*fn)()) {
+DCP_SYSV int32_t scePthreadOnce(int32_t* once, GuestFn<void()> fn) {
     std::lock_guard<std::recursive_mutex> lk(g_once_mu);
     if (*once == 0) {  // ScePthreadOnce = {int32 state; mutex}; state 0 = not run
         *once = 1;

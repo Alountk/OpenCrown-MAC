@@ -3,6 +3,7 @@
 #ifndef __x86_64__
 #include "dcp_abi.h"
 #include "dcp_dispatch.h"
+#include "dcp_guest.h"
 #endif
 #include <cstdint>
 #include <cstdio>
@@ -41,6 +42,33 @@ bool trace_enabled();  // DCP_TRACE=1: log every shim call, not only the first
             std::fprintf(stderr, "HLE %s: " fmt "\n", name __VA_OPT__(, ) __VA_ARGS__); \
         }                                                                              \
     } while (0)
+
+// A function pointer the guest handed to the HLE (thread entry, callback): on x86 a plain pointer the host calls directly; on
+// the recompiled arm64 build a wrapper whose call runs the guest function on the guest's own register file and stack.
+// `GuestFn<void(int, void*)>` replaces `DCP_SYSV void (*)(int, void*)`; `to_guest_fn<Sig>(ptr)` replaces a reinterpret_cast.
+#ifdef __x86_64__
+template <class Sig> using GuestFn = Sig*;
+template <class Sig> inline GuestFn<Sig> to_guest_fn(const void* p) { return reinterpret_cast<Sig*>(const_cast<void*>(p)); }
+template <class F> inline void* guest_fn_ptr(F f) { return reinterpret_cast<void*>(f); }
+#else
+template <class Sig> class GuestFn;
+template <class R, class... A> class GuestFn<R(A...)> {
+public:
+    GuestFn() = default;
+    GuestFn(std::nullptr_t) {}
+    explicit GuestFn(R (*p)(A...)) : p_(p) {}
+    explicit GuestFn(const void* p) : p_(reinterpret_cast<R (*)(A...)>(const_cast<void*>(p))) {}
+    static GuestFn from_guest_word(uint64_t w) { return GuestFn(reinterpret_cast<R (*)(A...)>(w)); }
+    explicit operator bool() const { return p_ != nullptr; }
+    void* address() const { return reinterpret_cast<void*>(p_); }
+    R operator()(A... a) const { return ::dcp::rt::guest_call(p_, a...); }
+
+private:
+    R (*p_)(A...) = nullptr;
+};
+template <class Sig> inline GuestFn<Sig> to_guest_fn(const void* p) { return GuestFn<Sig>(reinterpret_cast<Sig*>(const_cast<void*>(p))); }
+template <class R, class... A> inline void* guest_fn_ptr(GuestFn<R(A...)> f) { return f.address(); }
+#endif
 
 #ifdef __x86_64__
 #define REG(lib, fn) ::dcp::loader::register_hle(lib, #fn, reinterpret_cast<void*>(&fn))
