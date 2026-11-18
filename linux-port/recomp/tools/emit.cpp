@@ -29,8 +29,9 @@ bool inside_git_work_tree(const std::string& dir) {
 
 EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
     EmitStats st;
+    const std::vector<FdeRange> funcs = complete_functions(m);  // .eh_frame ranges plus entry points, PLT stubs and tail-jump targets
     std::set<uint64_t> starts;
-    for (const FdeRange& r : m.functions) starts.insert(r.start);
+    for (const FdeRange& r : funcs) starts.insert(r.start);
     const int shards = std::max(1, o.shards);
     const std::string head = lift_prelude() + lift_declarations(starts, o.module);
 
@@ -38,8 +39,8 @@ EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
     std::vector<std::string> bodies(size_t(shards), head);
     size_t total_insns = 0;
     std::vector<LiftResult> lifted;
-    lifted.reserve(m.functions.size());
-    for (const FdeRange& r : m.functions) {
+    lifted.reserve(funcs.size());
+    for (const FdeRange& r : funcs) {
         Function fn = discover_function(m.image.data(), m.image.size(), 0, r.start, r.size);
         lifted.push_back(lift_function(fn, starts, o.module, o.comments));
         total_insns += lifted.back().insns;
@@ -53,7 +54,7 @@ EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
         bodies[shard] += lr.code + "\n";
         acc += lr.insns;
     }
-    st.functions = m.functions.size();
+    st.functions = funcs.size();
 
     auto write = [&](const std::string& name, const std::string& text) {
         const std::string path = o.out_dir + "/" + name;

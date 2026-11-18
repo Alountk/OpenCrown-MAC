@@ -154,6 +154,37 @@ static void test_emit_and_run() {
     std::system(("rm -rf '" + dir + "'").c_str());
 }
 
+static void test_complete_functions() {
+    // Code without unwind info: the entry point (libc.prx's module_start sits at 0, before its first FDE), PLT stubs that are only
+    // ever called, and tail-jump targets all need to be functions of their own.
+    LoadedModule m;
+    m.image.assign(0x400, 0xcc);
+    const uint8_t a[] = {0xe8, 0x7b, 0x00, 0x00, 0x00, 0xc3};        // 0x100: call 0x180; ret
+    const uint8_t plt[] = {0xff, 0x25, 0x72, 0x01, 0x00, 0x00};      // 0x180: jmp [rip+0x172]
+    const uint8_t entry[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};    // 0x40: mov eax, 1; ret
+    const uint8_t b[] = {0xe9, 0xfb, 0x00, 0x00, 0x00};              // 0x200: jmp 0x300 (a tail call to code without an FDE)
+    std::memcpy(m.image.data() + 0x100, a, sizeof a);
+    std::memcpy(m.image.data() + 0x180, plt, sizeof plt);
+    std::memcpy(m.image.data() + 0x40, entry, sizeof entry);
+    std::memcpy(m.image.data() + 0x200, b, sizeof b);
+    m.image[0x300] = 0xc3;
+    m.entry = 0x40;
+    m.functions = {{0x100, 0x10}, {0x200, 0x10}};
+    const std::vector<FdeRange> all = complete_functions(m);
+    std::vector<uint64_t> starts;
+    for (const FdeRange& r : all) starts.push_back(r.start);
+    CHECK((starts == std::vector<uint64_t>{0x40, 0x100, 0x180, 0x200, 0x300}));
+    for (size_t i = 0; i + 1 < all.size(); ++i) CHECK(all[i].start + all[i].size <= all[i + 1].start);  // ranges never overlap
+    CHECK(all.front().start == 0x40 && all.front().size == 0xc0);  // up to the next function
+    // nothing to add when everything is covered
+    LoadedModule c;
+    c.image = m.image;
+    c.entry = 0x100;
+    c.functions = {{0x100, 0x10}};
+    c.image[0x100] = 0xc3;
+    CHECK(complete_functions(c).size() == 1);
+}
+
 static void test_repo_guard() {
     // Generated sources must not end up in a git work tree (they are derived from the user's game files).
     const char* t = getenv("TMPDIR");
@@ -177,6 +208,7 @@ int main() {
     test_errors_are_readable();
     test_emit_and_run();
     test_repo_guard();
+    test_complete_functions();
     if (g_fail) return std::fprintf(stderr, "module: %d check(s) failed\n", g_fail), 1;
     std::puts("module: all tests passed");
     return 0;
