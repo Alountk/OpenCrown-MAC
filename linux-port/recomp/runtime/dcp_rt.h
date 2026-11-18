@@ -539,4 +539,119 @@ template <class F, int B> inline Vec vpround(const Vec& a, unsigned imm) {
     return r;
 }
 
+// ---- blends, shuffles and lane moves (float domain) --------------------------------------------------------------
+// "Group" = one 128-bit half: the AVX shuffles never cross halves except vperm2f128, vinsertf128 and vextractf128.
+
+inline Vec vmk(u64 a, u64 b) { return Vec{{a, b, 0, 0}}; }
+
+template <class U, int B> inline Vec vblendv(const Vec& a, const Vec& b, const Vec& m) {
+    Vec r = vzero();
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i) setlane<U>(r, i, msb(lane<U>(m, i)) ? lane<U>(b, i) : lane<U>(a, i));
+    return r;
+}
+template <class U, int B> inline Vec vblendi(const Vec& a, const Vec& b, unsigned imm) {
+    Vec r = vzero();
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i) setlane<U>(r, i, (imm >> i) & 1 ? lane<U>(b, i) : lane<U>(a, i));
+    return r;
+}
+template <int B> inline Vec vpermilps_i(const Vec& a, unsigned imm) {
+    Vec r = vzero();
+    for (int g = 0; g < B / 128; ++g)
+        for (int j = 0; j < 4; ++j) setlane<u32>(r, g * 4 + j, lane<u32>(a, g * 4 + int((imm >> (2 * j)) & 3)));
+    return r;
+}
+template <int B> inline Vec vpermilps_v(const Vec& a, const Vec& c) {
+    Vec r = vzero();
+    for (int g = 0; g < B / 128; ++g)
+        for (int j = 0; j < 4; ++j) setlane<u32>(r, g * 4 + j, lane<u32>(a, g * 4 + int(lane<u32>(c, g * 4 + j) & 3)));
+    return r;
+}
+template <int B> inline Vec vpermilpd_i(const Vec& a, unsigned imm) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 64; ++i) setlane<u64>(r, i, lane<u64>(a, (i & ~1) + int((imm >> i) & 1)));
+    return r;
+}
+template <int B> inline Vec vpermilpd_v(const Vec& a, const Vec& c) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 64; ++i) setlane<u64>(r, i, lane<u64>(a, (i & ~1) + int((lane<u64>(c, i) >> 1) & 1)));
+    return r;
+}
+// imm[7:6] picks the source lane (register source only), imm[5:4] the destination lane, imm[3:0] zeroes lanes.
+inline Vec vinsertps(const Vec& a, const Vec& b, unsigned imm, bool b_is_mem) {
+    Vec r = a;
+    r.q[2] = r.q[3] = 0;
+    setlane<u32>(r, int((imm >> 4) & 3), lane<u32>(b, b_is_mem ? 0 : int((imm >> 6) & 3)));
+    for (int i = 0; i < 4; ++i)
+        if ((imm >> i) & 1) setlane<u32>(r, i, 0u);
+    return r;
+}
+inline Vec vinsert128(Vec a, const Vec& b, unsigned imm) {
+    a.q[(imm & 1) * 2] = b.q[0];
+    a.q[(imm & 1) * 2 + 1] = b.q[1];
+    return a;
+}
+inline Vec vextract128(const Vec& s, unsigned imm) { return vmk(s.q[(imm & 1) * 2], s.q[(imm & 1) * 2 + 1]); }
+inline Vec vperm2f128(const Vec& a, const Vec& b, unsigned imm) {
+    Vec r = vzero();
+    for (int h = 0; h < 2; ++h) {
+        const unsigned f = (imm >> (4 * h)) & 15;
+        if (f & 8) continue;
+        const Vec& src = (f & 2) ? b : a;
+        r.q[h * 2] = src.q[(f & 1) * 2];
+        r.q[h * 2 + 1] = src.q[(f & 1) * 2 + 1];
+    }
+    return r;
+}
+template <class U, int B> inline Vec vbcast(U e) {
+    Vec r = vzero();
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i) setlane<U>(r, i, e);
+    return r;
+}
+inline Vec vbcast128(const Vec& b) { return Vec{{b.q[0], b.q[1], b.q[0], b.q[1]}}; }
+template <int B> inline Vec vmovshdup(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<u32>(r, i, lane<u32>(a, i | 1));
+    return r;
+}
+template <int B> inline Vec vmovsldup(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 32; ++i) setlane<u32>(r, i, lane<u32>(a, i & ~1));
+    return r;
+}
+template <int B> inline Vec vmovddup(const Vec& a) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 64; ++i) setlane<u64>(r, i, lane<u64>(a, i & ~1));
+    return r;
+}
+// unpcklps / unpckhps / unpcklpd / unpckhpd: interleave the low (or high) elements of each group of a and b.
+template <class U, bool Hi, int B> inline Vec vunpck(const Vec& a, const Vec& b) {
+    constexpr int n = 16 / int(sizeof(U));
+    Vec r = vzero();
+    for (int g = 0; g < B / 128; ++g)
+        for (int j = 0; j < n / 2; ++j) {
+            const int idx = g * n + (Hi ? n / 2 : 0) + j;
+            setlane<U>(r, g * n + 2 * j, lane<U>(a, idx));
+            setlane<U>(r, g * n + 2 * j + 1, lane<U>(b, idx));
+        }
+    return r;
+}
+template <int B> inline Vec vshufps(const Vec& a, const Vec& b, unsigned imm) {
+    Vec r = vzero();
+    for (int g = 0; g < B / 128; ++g)
+        for (int j = 0; j < 4; ++j)
+            setlane<u32>(r, g * 4 + j, lane<u32>(j < 2 ? a : b, g * 4 + int((imm >> (2 * j)) & 3)));
+    return r;
+}
+template <int B> inline Vec vshufpd(const Vec& a, const Vec& b, unsigned imm) {
+    Vec r = vzero();
+    for (int i = 0; i < B / 64; ++i) setlane<u64>(r, i, lane<u64>(i & 1 ? b : a, (i & ~1) + int((imm >> i) & 1)));
+    return r;
+}
+// movmskps / movmskpd: the sign bit of every element.
+template <class U, int B> inline u32 vmovmsk(const Vec& a) {
+    u32 m = 0;
+    for (int i = 0; i < B / (8 * int(sizeof(U))); ++i) m |= u32(msb(lane<U>(a, i))) << i;
+    return m;
+}
+
 }  // namespace dcp::rt
