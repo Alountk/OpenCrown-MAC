@@ -477,8 +477,8 @@ struct Lifter {
             else emit(write(d, e));
             return true;
         }
-        if (mn == "vmovlps" || mn == "vmovhps") {
-            const int idx = mn == "vmovhps" ? 1 : 0;
+        if (mn == "vmovlps" || mn == "vmovhps" || mn == "vmovlpd" || mn == "vmovhpd") {
+            const int idx = mn == "vmovhps" || mn == "vmovhpd" ? 1 : 0;
             if (in.nops == 3) return V(fmt("vmk(%s, %s)", idx ? fmt("x[%d].q[0]", s.vec).c_str() : fmt("ld<u64>(%s)", addr(t).c_str()).c_str(),
                                             idx ? fmt("ld<u64>(%s)", addr(t).c_str()).c_str() : fmt("x[%d].q[1]", s.vec).c_str()));
             emit(fmt("st<u64>(%s, x[%d].q[%d]);", addr(d).c_str(), s.vec, idx));
@@ -500,10 +500,10 @@ struct Lifter {
         const Operand& d = in.ops[0];
         // VEX forms that take (dest, src1, src2): the legacy form has dest == src1
         static const char* dup[] = {"add", "sub", "mul", "div", "min", "max", "sqrt", "and", "andn", "or", "xor", "cmp", "unpckl",
-                                    "unpckh", "shuf", "cvtsi2", "cvtss2sd", "cvtsd2ss", "padd", "psub", "pcmpeq", "pcmpgt", "punpckl",
+                                    "unpckh", "shuf", "movlp", "movhp", "cvtsi2", "cvtss2sd", "cvtsd2ss", "padd", "psub", "pcmpeq", "pcmpgt", "punpckl",
                                     "punpckh", "pxor", "por", "pand", "pandn", "pmull", "pack"};
         static const char* same[] = {"movaps", "movups", "movapd", "movupd", "movdqa", "movdqu", "ucomiss", "ucomisd", "comiss",
-                                     "comisd", "movd", "movq", "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si", "pshufd", "pshuflw",
+                                     "comisd", "movntdq", "movntps", "movntpd", "movntdqa", "movd", "movq", "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si", "pshufd", "pshuflw",
                                      "pshufhw", "movddup", "movshdup", "movsldup"};
         bool shift = false, known = false;
         for (const char* k : same) known |= mn == k;
@@ -559,7 +559,7 @@ struct Lifter {
         if (!starts_with(mn, "v")) return legacy_sse(in);
 
         if (mn == "vmovups" || mn == "vmovaps" || mn == "vmovupd" || mn == "vmovapd" || mn == "vmovdqa" || mn == "vmovdqu" ||
-            mn == "vlddqu") {
+            mn == "vlddqu" || mn == "vmovntdq" || mn == "vmovntps" || mn == "vmovntpd" || mn == "vmovntdqa") {
             if (is_vec(d)) return vset(d, vread(s));
             return emit(fmt("vst<%d>(%s, x[%d]);", d.bits, addr(d).c_str(), s.vec));
         }
@@ -580,6 +580,13 @@ struct Lifter {
             return emit(write(d, fmt("vlo<%s>(x[%d])", T, s.vec)));
         }
 
+        if (mn == "vptest" && in.nops == 2) return emit(fmt("vptest<%d>(x[%d], %s, fl);", d.bits, d.vec, vread(s).c_str())), void();
+        if (mn == "vcvtdq2pd" && in.nops == 2) return vset(d, fmt("vpcvtdq2pd<%d>(%s)", d.bits, vread(s).c_str()));
+        if ((mn == "vmaskmovps" || mn == "vmaskmovpd") && in.nops == 3) {
+            const char* U = mn == "vmaskmovps" ? "u32" : "u64";
+            if (is_vec(d)) return vset(d, fmt("vmaskload<%s, %d>(x[%d], %s)", U, d.bits, s.vec, addr(in.ops[2]).c_str()));
+            return emit(fmt("vmaskstore<%s, %d>(%s, x[%d], x[%d]);", U, in.ops[2].bits, addr(d).c_str(), s.vec, in.ops[2].vec)), void();
+        }
         struct Bit { const char* mn; const char* fn; };
         static const Bit bits[] = {{"vxorps", "vxor"}, {"vxorpd", "vxor"}, {"vpxor", "vxor"},  {"vandps", "vand"},
                                    {"vandpd", "vand"}, {"vpand", "vand"},  {"vandnps", "vandn"}, {"vandnpd", "vandn"},
@@ -765,6 +772,13 @@ struct Lifter {
             return;
         }
         if (string_insn(in)) return;
+        if (mn == "stmxcsr") return emit(fmt("st<u32>(%s, 0x1f80);  // the default: all exceptions masked, round to nearest", addr(in.ops[0]).c_str()));
+        if (mn == "pushfq") return emit("{ r[RSP] -= 8; st<u64>(r[RSP], pack_flags(fl) | 0x202); }");
+        if (mn == "popfq") return emit("{ u64 v = ld<u64>(r[RSP]); r[RSP] += 8; fl = unpack_flags(v); }");
+        if (mn == "movnti") return emit(fmt("st<%s>(%s, %s);", ut(in.ops[1].bits), addr(in.ops[0]).c_str(), read(in.ops[1]).c_str()));
+        if ((mn == "shld" || mn == "shrd") && in.nops == 3)
+            return emit(write(in.ops[0], fmt("%s<%s>(%s, %s, %s, fl)", mn.c_str(), ut(in.ops[0].bits), read(in.ops[0]).c_str(),
+                                             read(in.ops[1], in.ops[0].bits).c_str(), read(in.ops[2], 8).c_str())));
         if (mn == "clc") return emit("fl.cf = false;");
         if (mn == "stc") return emit("fl.cf = true;");
         if (mn == "cmc") return emit("fl.cf = !fl.cf;");
