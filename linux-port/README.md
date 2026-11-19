@@ -55,3 +55,15 @@ rendered (same behaviour as Windows on the same dump), audio, keyboard/mouse and
 (controls, touch, Game Mode), Wayland desktops, and online play against the live lobby server. Feedback is welcome
 on Discord or through the launcher's Report a Bug page. Saves, settings and logs live in
 `${XDG_DATA_HOME:-~/.local/share}/OpenCrown/` (on macOS: `~/Library/Application Support/OpenCrown/`).
+
+## Apple Silicon (native arm64, no JIT)
+
+```sh
+./play-mac.sh /path/to/your/dump/CUSA10454      # the folder holding eboot.bin and sce_module/libc.prx
+./play-mac.sh /path/to/eboot.bin --fullscreen   # extra options go to dcp_run
+```
+
+Needs cmake and the Xcode command line tools (ninja is used when installed). The script builds the recompiler, recompiles your
+own decrypted dump into C++, builds `dcp_run` natively and starts the game. Generated code lives in
+`~/Library/Application Support/OpenCrown/build` (override with `DCP_WORK_DIR`; it refuses a folder inside a git repository) and
+is redone only when the dump or the recompiler changes: the first run takes about 4 minutes, later ones a few seconds.

@@ -41,7 +41,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [ ] Performance pass
 
 ## Phase 6: Delivery
-- [ ] T6d: one-command pipeline (recompile, build, run) for the user's own dump
+- [x] T6d: one-command pipeline for the user's own dump: `linux-port/play-mac.sh <dump folder>` (from scratch 235 s, then 8 s)
 - [ ] Packaging and docs
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)
