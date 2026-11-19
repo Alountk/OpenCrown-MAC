@@ -62,6 +62,7 @@ extern char** environ;
 #include "../common/dump_check.h"
 #include "../common/game_version.h"
 #include "../common/steam_video.h"
+#include "platform.h"
 #include "../common/input_defaults.h"
 #include "../common/save_check.h"
 #include "pad_setup.h"
@@ -132,14 +133,18 @@ std::vector<pid_t> g_openers;
 
 // Opens a folder or file in the desktop's default app: xdg-open with the path as one argv entry (no shell).
 void open_in_explorer(const std::string& p) {
-    const char* argv[] = {"xdg-open", p.c_str(), nullptr};
+    const char* opener = dcp::launcher::opener_program();
+    const char* argv[] = {opener, p.c_str(), nullptr};
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    dcp::launcher::keep_only_stdio(&fa, &attr, {1, 2});
     pid_t pid;
-    if (posix_spawnp(&pid, "xdg-open", &fa, nullptr, const_cast<char**>(argv), environ) == 0) g_openers.push_back(pid);
-    else std::fprintf(stderr, "launcher: xdg-open not found; open %s by hand\n", p.c_str());
+    if (posix_spawnp(&pid, opener, &fa, &attr, const_cast<char**>(argv), environ) == 0) g_openers.push_back(pid);
+    else std::fprintf(stderr, "launcher: %s not found; open %s by hand\n", opener, p.c_str());
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
 }
 
@@ -456,13 +461,7 @@ std::vector<std::string> log_tail(const std::string& path, size_t n) {
     return {d.begin(), d.end()};
 }
 
-std::string exe_dir() {  // folder of this binary (/proc/self/exe resolves symlinks)
-    char buf[4096];
-    ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
-    std::string s = n > 0 ? std::string(buf, size_t(n)) : ".";
-    size_t slash = s.find_last_of('/');
-    return slash == std::string::npos ? "." : slash == 0 ? "/" : s.substr(0, slash);
-}
+std::string exe_dir() { return dcp::launcher::dir_of(dcp::launcher::self_exe_path().empty() ? "./x" : dcp::launcher::self_exe_path()); }  // folder of this binary
 
 void set_env(const char* k, const std::string& v) {  // "" removes it; inherited by dcp_run
     if (v.empty()) unsetenv(k);
@@ -519,11 +518,14 @@ bool start_game(Game& g, const Settings& s, const std::string& user, const std::
     posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&fa, 1, log_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
     posix_spawn_file_actions_adddup2(&fa, 1, 2);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    dcp::launcher::keep_only_stdio(&fa, &attr, {});
     const std::string dir = exe_dir();
     posix_spawn_file_actions_addchdir_np(&fa, dir.c_str());
     pid_t pid = 0;
-    int rc = posix_spawn(&pid, exe.c_str(), &fa, nullptr, argv.data(), environ);
+    int rc = posix_spawn(&pid, exe.c_str(), &fa, &attr, argv.data(), environ);
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     // glibc reports a failed exec / file action (log not writable) as the spawn's own error.
     if (rc != 0) { g.error = "cannot start dcp_run: " + std::string(std::strerror(rc)) + " (log " + log_path + ")"; return false; }
@@ -883,9 +885,12 @@ bool relaunch(const std::string& appimage, std::string* err) {
     const char* argv[] = {appimage.c_str(), "--updated", OPENCROWN_VERSION, nullptr};
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    dcp::launcher::keep_only_stdio(&fa, &attr, {0, 1, 2});
     pid_t pid;
-    int rc = posix_spawn(&pid, appimage.c_str(), &fa, nullptr, const_cast<char**>(argv), environ);
+    int rc = posix_spawn(&pid, appimage.c_str(), &fa, &attr, const_cast<char**>(argv), environ);
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
     if (rc != 0) *err = "the update is installed, but starting it failed (" + std::string(std::strerror(rc)) +
                         "): start the launcher again by hand";
@@ -1344,10 +1349,13 @@ void spawn_detached(const std::vector<std::string>& args) {
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
-    posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    dcp::launcher::keep_only_stdio(&fa, &attr, {1, 2});
     pid_t pid;
-    if (posix_spawnp(&pid, argv[0], &fa, nullptr, argv.data(), env.data()) == 0) g_openers.push_back(pid);
+    if (posix_spawnp(&pid, argv[0], &fa, &attr, argv.data(), env.data()) == 0) g_openers.push_back(pid);
     else std::fprintf(stderr, "launcher: cannot start %s\n", argv[0]);
+    posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&fa);
 }
 
@@ -1358,7 +1366,7 @@ void open_steam_keyboard(const ImVec2& pos, float line_h, bool multiline) {
     std::snprintf(url, sizeof url, "steam://open/keyboard?XPosition=%d&YPosition=%d&Width=1&Height=%d&Mode=%d",
                   int(pos.x), int(pos.y), std::max(1, int(line_h)), multiline ? 1 : 0);
     std::fprintf(stderr, "launcher: on-screen keyboard: xdg-open %s\n", url);
-    spawn_detached({"xdg-open", url});
+    spawn_detached({dcp::launcher::opener_program(), url});
 }
 
 bool is_dir(const std::string& p) {
