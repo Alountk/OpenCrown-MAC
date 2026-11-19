@@ -161,7 +161,8 @@ DCP_SYSV int32_t scePthreadCancel(Thread* t) {
     DCP_HLE_LOG("scePthreadCancel", "'%s' ignored (no async cancel on the host)", t ? t->name : "?");
     return kOk;
 }
-// A busy wait built on yield burns a core: throttle threads that keep yielding (yield_throttle.h).
+// A busy wait built on yield burns a core: throttle threads that keep yielding (yield_throttle.h). macOS only for now.
+#ifdef __APPLE__
 void throttled_yield() {
     static const bool off = [] { const char* v = std::getenv("DCP_YIELD_THROTTLE"); return v && v[0] == '0'; }();  // diagnosis switch
     if (off) return (void)::sched_yield();
@@ -175,8 +176,14 @@ void throttled_yield() {
         nanosleep(&nap, nullptr);
     }
 }
+#endif
+#ifdef __APPLE__
 DCP_SYSV int32_t scePthreadYield() { return throttled_yield(), kOk; }
 DCP_SYSV int32_t sched_yield() { return throttled_yield(), 0; }
+#else
+DCP_SYSV int32_t scePthreadYield() { return ::sched_yield(), kOk; }  // Linux: unchanged (the throttle is measured on macOS only)
+DCP_SYSV int32_t sched_yield() { return ::sched_yield(), 0; }
+#endif
 DCP_SYSV int32_t scePthreadSetprio(Thread* t, int32_t p) { return t->attr.prio = p, kOk; }
 DCP_SYSV int32_t scePthreadGetprio(Thread* t, int32_t* p) { return *p = t->attr.prio, kOk; }
 DCP_SYSV int32_t scePthreadSetaffinity(Thread* t, uint64_t m) { return t->attr.affinity = m, kOk; }

@@ -46,5 +46,6 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] Launcher (tools/launcher, ImGui) builds and opens on macOS (spawn, `open`, exe path through tools/launcher/platform.h)
 - [ ] Launcher on macOS: Play must run the recompile pipeline (play-mac.sh) and show its progress; no AppImage updater or Steam bits; check every page (controls, display, online)
 - [ ] Packaging and docs
+- [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)

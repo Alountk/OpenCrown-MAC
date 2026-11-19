@@ -1,5 +1,6 @@
 // dcp_run's SDL3 audio sink: mixes every open AudioOut port down to float stereo 48 kHz into one SDL audio stream.
-// submit() returns at real-time pace (like the PS4); a cushion of silence in the SDL stream absorbs jitter.
+// Linux: submit() blocks while more than the queue target is queued, which is what paces CRI's mixer thread.
+// macOS: submit() returns at real-time pace (like the PS4); a cushion of silence in the SDL stream absorbs jitter.
 #include "sdl_audio.h"
 
 #include <SDL3/SDL.h>
@@ -47,6 +48,7 @@ public:
                 mix_[f * 2] = mix_[f * 2 + 1] = 0.25f * std::sin(6.2831853f * 440.0f * float(tone_pos_ % 48000) / 48000.0f);
         int bytes = int(mix_.size() * sizeof(float));
         if (raw_) std::fwrite(mix_.data(), 1, size_t(bytes), raw_);  // DCP_AUDIO_RAW=path: f32 stereo 48 kHz, what SDL gets
+#ifdef __APPLE__
         if (!primed_) {  // fixed cushion of silence: the queue then hovers around target_ while calls keep real-time pace
             std::vector<float> pad(size_t(target_ / 4), 0.0f);
             SDL_PutAudioStreamData(s_, pad.data(), int(pad.size() * sizeof(float)));
@@ -64,6 +66,14 @@ public:
         next_ += step + err_ns / 64;
         if (next_ > int64_t(now)) SDL_DelayPrecise(uint64_t(next_ - int64_t(now)));
         stat(queued, bytes, SDL_GetTicksNS() - now);
+#else
+        // Linux / Steam Deck: unchanged: block while more than the queue target is queued, which paces CRI's mixer thread.
+        int queued = SDL_GetAudioStreamQueued(s_);
+        uint64_t t0 = SDL_GetTicksNS();
+        while (queued > target_) SDL_Delay(1), queued = SDL_GetAudioStreamQueued(s_);
+        SDL_PutAudioStreamData(s_, mix_.data(), bytes);
+        stat(queued, bytes, SDL_GetTicksNS() - t0);
+#endif
     }
 
 private:
