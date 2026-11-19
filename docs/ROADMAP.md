@@ -44,7 +44,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 ## Phase 6: Delivery
 - [x] T6d: one-command pipeline for the user's own dump: `linux-port/play-mac.sh <dump folder>` (from scratch 235 s, then 8 s)
 - [x] Launcher (tools/launcher, ImGui) builds and opens on macOS (spawn, `open`, exe path through tools/launcher/platform.h)
-- [ ] Launcher on macOS: Play must run the recompile pipeline (play-mac.sh) and show its progress; no AppImage updater or Steam bits; check every page (controls, display, online)
+- [x] Launcher on macOS: Play runs play-mac.sh and the status line shows its step (preparing / recompiling / building)
+- [ ] Launcher on macOS: check every page by hand (controls, display, online); hide the AppImage updater and Steam bits; a Stop button
 - [ ] Packaging and docs
 - [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [ ] Upstream licence / permission
