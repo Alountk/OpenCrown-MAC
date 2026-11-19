@@ -5,7 +5,8 @@
 # (ninja is used when installed). Everything generated lives in $DCP_WORK_DIR (default
 # ~/Library/Application Support/OpenCrown/build), never in this repository: it is derived from your game files, do not share
 # it. The recompile (about 2 minutes) is redone only when the dump or the recompiler changes.
-# DCP_PLAY_DRY=1 prints the commands without running them (used by tests/play_mac_test.sh).
+# DCP_PLAY_DRY=1 prints the commands without running them (used by tests/play_mac_test.sh). DCP_PLAY_BUILD_ONLY=1 prepares everything
+# and stops before starting the game.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -70,6 +71,11 @@ fi
 
 run cmake -S "$here" -B "$work/run" $gen -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON -DDCP_RECOMPILED_DIR="$work/gen" -DDCP_RENDER=ON
 run cmake --build "$work/run" --target dcp_run -j"$jobs"
+
+if [ "${DCP_PLAY_BUILD_ONLY:-0}" = 1 ]; then  # everything is ready; the caller starts the game (play-mac-online-test.sh)
+  echo "play-mac: build done ($work/run/dcp_run)"
+  exit 0
+fi
 
 echo "+ $work/run/dcp_run $eboot --window --renderer gl $*"
 [ "$dry" = 1 ] || exec "$work/run/dcp_run" "$eboot" --window --renderer gl "$@"
