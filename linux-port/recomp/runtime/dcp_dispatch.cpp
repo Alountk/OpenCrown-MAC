@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -39,6 +41,20 @@ void set_function_table(const FnEntry* sorted, size_t count) { g_first.table = s
 void add_module(u64 base, u64 size, const FnEntry* sorted, size_t count) { g_more.push_back({base, size, sorted, count}); }
 void register_host_function(const void* host_fn, Fn thunk) { g_host[reinterpret_cast<u64>(host_fn)] = thunk; }
 void set_foreign_handler(ForeignHandler handler) { g_foreign = handler ? handler : default_foreign; }
+
+namespace {
+std::map<std::pair<std::string, u64>, EntryHook*>& hook_slots() {
+    static std::map<std::pair<std::string, u64>, EntryHook*> m;
+    return m;
+}
+}  // namespace
+void register_hook_slot(const char* module, u64 off, EntryHook* slot) { hook_slots()[{module, off}] = slot; }
+bool set_entry_hook(const char* module, u64 off, EntryHook fn) {
+    auto it = hook_slots().find({module, off});
+    if (it == hook_slots().end()) return false;
+    *it->second = fn;
+    return true;
+}
 
 static Fn lookup(const Module& m, u64 target) {
     const u64 off = target - m.base;  // wraps for targets below the image, which the size check then rejects

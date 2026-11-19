@@ -128,12 +128,32 @@ static void test_word_constructible_arguments() {
     CHECK(f.c.r[RAX] == 47);  // the handle consumed rdi, the int the next register, rsi
 }
 
+static int g_obs_sum = 0;
+static void observe(int a, u64 b, double d, u64 s1) { g_obs_sum = a + int(b) + int(d) + int(s1); }
+
+static void test_observer() {
+    // An observer reads the call's arguments like a thunk does, but the call itself is left alone: no result, return address kept.
+    Frame f;
+    f.c.r[RDI] = 1, f.c.r[RSI] = 20, f.c.r[RAX] = 0x77;
+    f.c.x[0] = vscalar<u64>(0);
+    const double d = 300.0;
+    u64 raw;
+    std::memcpy(&raw, &d, 8);
+    f.c.x[0] = vscalar<u64>(raw);
+    f.c.r[RDX] = 4000;
+    const u64 sp = f.c.r[RSP];
+    observer<observe>(&f.c);
+    CHECK(g_obs_sum == 4321);
+    CHECK(f.c.r[RSP] == sp && f.c.r[RAX] == 0x77);
+}
+
 int main() {
     test_integers();
     test_stack_arguments();
     test_floating_point();
     test_pointers_and_small_types();
     test_word_constructible_arguments();
+    test_observer();
     if (g_fail) return std::fprintf(stderr, "abi: %d check(s) failed\n", g_fail), 1;
     std::puts("abi: all tests passed");
     return 0;

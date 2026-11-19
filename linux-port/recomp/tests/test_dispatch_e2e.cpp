@@ -106,6 +106,42 @@ static int computed_jump() {
     return 0;
 }
 
+// An entry hook runs with the entry state of the call, before the body: it sees the arguments and can change them.
+static int entry_hook() {
+    std::vector<uint8_t> img(0x2000, 0xcc);
+    const uint8_t f[] = {0x8d, 0x47, 0x01, 0xc3};  // lea eax,[rdi+1]; ret
+    std::memcpy(img.data() + 0x1000, f, sizeof f);
+    std::memcpy(img.data() + 0x1010, f, sizeof f);
+    const std::set<uint64_t> fns{0x1000, 0x1010}, hooks{0x1000};
+    std::string code = lift_prelude() + lift_declarations(fns, "", hooks);
+    for (uint64_t a : {0x1000, 0x1010})
+        code += lift_function(discover_function(img.data(), img.size(), 0, a, sizeof f), fns, "", true, hooks).code;
+    code += lift_function_table(fns, "", hooks);
+    void* lib = build_and_load(code);
+    if (!lib) return 1;
+    auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register"));
+    auto hooked = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1000")), plain = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1010"));
+    auto slot = reinterpret_cast<void (**)(Ctx*)>(dlsym(lib, "dcp_hook_1000"));
+    if (!reg || !hooked || !plain || !slot) return std::fprintf(stderr, "e2e: missing symbols for the entry hook\n"), 1;
+    reg(reinterpret_cast<unsigned long long>(img.data()), img.size());
+    alignas(16) static uint8_t stack[256];
+    const uint64_t sp = reinterpret_cast<uint64_t>(stack) + sizeof stack;
+    static uint64_t seen_rdi, seen_rsp;
+    auto run = [&](void (*fn)(Ctx*), uint64_t rdi) {
+        Ctx c{};
+        c.r[dcp::rt::RSP] = sp - 8, c.r[dcp::rt::RDI] = rdi;
+        fn(&c);
+        return c.r[dcp::rt::RAX];
+    };
+    if (run(hooked, 5) != 6) return std::fprintf(stderr, "e2e: unset hook changed the result\n"), 1;
+    *slot = [](Ctx* c) { seen_rdi = c->r[dcp::rt::RDI], seen_rsp = c->r[dcp::rt::RSP], c->r[dcp::rt::RDI] += 100; };
+    if (run(hooked, 5) != 106 || seen_rdi != 5 || seen_rsp != sp - 8)
+        return std::fprintf(stderr, "e2e: hook saw rdi=%llu or did not run before the body\n", (unsigned long long)seen_rdi), 1;
+    seen_rdi = 0;
+    if (run(plain, 5) != 6 || seen_rdi != 0) return std::fprintf(stderr, "e2e: an unhooked function ran the hook\n"), 1;
+    return 0;
+}
+
 int main() {
     std::vector<uint8_t> img(0x2000, 0xcc);
     // 0x1000: lea rcx,[rip+0xf9] (-> 0x1100); call rcx; add eax,1; ret
@@ -141,7 +177,7 @@ int main() {
     int fail = 0;
     if (uint32_t(c.r[dcp::rt::RAX]) != 8) std::fprintf(stderr, "e2e: eax = %llu, expected 8\n", (unsigned long long)c.r[dcp::rt::RAX]), ++fail;
     if (c.r[dcp::rt::RSP] != sp) std::fprintf(stderr, "e2e: rsp not restored\n"), ++fail;
-    if (fail || two_modules() || computed_jump()) return 1;
+    if (fail || two_modules() || computed_jump() || entry_hook()) return 1;
     std::puts("dispatch e2e: ok");
     return 0;
 }

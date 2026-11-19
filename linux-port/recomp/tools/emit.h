@@ -2,6 +2,7 @@
 // The output is derived from the user's own game files: it goes to a directory the user chooses, never into this repository.
 #pragma once
 #include <map>
+#include <set>
 #include <string>
 
 #include "module.h"
@@ -13,7 +14,11 @@ struct EmitOptions {
     std::string out_dir;   // must exist
     int shards = 8;        // function bodies are split over this many files, balanced by instruction count
     bool comments = false; // keep the "// 0x...: instruction" lines (about 40% more text)
+    std::set<uint64_t> hooks;  // image offsets of functions that call an EntryHook slot on entry (offsets that are no function are ignored)
 };
+
+// A hook list: one hexadecimal image offset per line, `#` starts a comment. Throws std::runtime_error on anything else.
+std::set<uint64_t> parse_hooks(const std::string& text);
 
 struct EmitStats {
     size_t functions = 0, insns = 0, files = 0, unsupported = 0;

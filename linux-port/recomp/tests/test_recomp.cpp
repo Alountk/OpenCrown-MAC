@@ -197,6 +197,24 @@ static void test_declarations() {
     CHECK(lift_function_table({}).find("set_function_table(kFunctions, 0)") != std::string::npos);
 }
 
+static void test_entry_hooks() {
+    // A function listed as hooked calls a host slot before its body runs; the slot is declared, defined and registered by name.
+    const std::set<uint64_t> hooks{0x1000};
+    const std::string d = lift_declarations({0x1000, 0x20f0}, "", hooks);
+    CHECK(d.find("extern dcp::rt::EntryHook dcp_hook_1000;") != std::string::npos && d.find("dcp_hook_20f0") == std::string::npos);
+    const std::string t = lift_function_table({0x1000, 0x20f0}, "libc", hooks);
+    CHECK(t.find("dcp::rt::EntryHook dcp_hook_libc_1000 = nullptr;") != std::string::npos);
+    CHECK(t.find("register_hook_slot(\"libc\", 0x1000u, &dcp_hook_libc_1000);") != std::string::npos && t.find("dcp_hook_libc_20f0") == std::string::npos);
+    CHECK(lift_declarations({0x1000}).find("EntryHook") == std::string::npos);  // nothing changes without hooks
+    const uint8_t code[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};  // mov eax,1; ret
+    const std::set<uint64_t> fns{0x1000};
+    const Function fn = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    const std::string hooked = lift_function(fn, fns, "", false, hooks).code;
+    const size_t at = hooked.find("if (dcp_hook_1000) dcp_hook_1000(c);");
+    CHECK(at != std::string::npos && at < hooked.find("DCP_LOAD();"));  // before the registers are loaded: the hook sees the entry state
+    CHECK(lift_function(fn, fns, "", false).code.find("dcp_hook") == std::string::npos);
+}
+
 static void test_cfg() {
     // push rbp; mov rbp,rsp; test edi,edi; jz L; call 0x2000; pop rbp; ret; L: xor eax,eax; pop rbp; ret
     const uint8_t code[] = {0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x74, 0x07, 0xe8, 0xf3, 0x0f, 0x00, 0x00,
@@ -289,6 +307,7 @@ int main() {
     test_hoisted_table_base();
     test_computed_jump_into_function();
     test_declarations();
+    test_entry_hooks();
     test_eh_frame();
     if (g_fail) return 1;
     std::puts("recomp: all tests passed");

@@ -28,6 +28,11 @@ void set_function_table(const FnEntry* sorted, size_t count);
 using ForeignHandler = void (*)(Ctx*, u64 target);
 void set_foreign_handler(ForeignHandler handler);
 
+// Entry hooks. The generated code of a hooked function (dcp_recompile --hooks) owns one EntryHook slot and registers it by
+// module name and image offset; the host installs a hook function there (nullptr removes it). False when no such slot exists.
+void register_hook_slot(const char* module, u64 off, EntryHook* slot);
+bool set_entry_hook(const char* module, u64 off, EntryHook fn);
+
 // A host function the guest can reach by pointer (an HLE import: the loader stores its address in the guest's GOT).
 // `thunk` adapts the guest registers to it (see dcp_abi.h) and pops the return address. Register before running guest code.
 void register_host_function(const void* host_fn, Fn thunk);
