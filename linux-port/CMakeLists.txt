@@ -224,6 +224,9 @@ if(DCP_RENDER)
   target_link_libraries(opencrown_launcher PRIVATE dcp_imgui dcp_formats dcp_net)
   set_target_properties(opencrown_launcher PROPERTIES OUTPUT_NAME "opencrown-launcher")
   target_compile_definitions(opencrown_launcher PRIVATE OPENCROWN_VERSION="${OPENCROWN_VERSION}")
+  if(APPLE)  # Play runs play-mac.sh from the source tree this was built from
+    target_compile_definitions(opencrown_launcher PRIVATE DCP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  endif()
 endif()
 
 # Mock lobby server (notes/map/lobby_protocol.md) for local multiplayer tests.

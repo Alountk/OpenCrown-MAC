@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "../tools/launcher/platform.h"
 
@@ -51,6 +52,27 @@ int main() {
     const std::string self = dcp::launcher::self_exe_path();
     CHECK(!self.empty() && self[0] == '/' && self.find("test_launcher_platform") != std::string::npos);
     CHECK(dcp::launcher::dir_of("/a/b/c") == "/a/b" && dcp::launcher::dir_of("/c") == "/" && dcp::launcher::dir_of("c") == ".");
+    // The command the Play button runs: dcp_run next to the launcher, or on macOS the play-mac.sh pipeline for the dump folder.
+    using V = std::vector<std::string>;
+    const V flags = {"--render", "--window", "--renderer", "auto", "--size", "1280x720"};
+    CHECK((dcp::launcher::game_command(false, "/app", "/src", "/d/CUSA/eboot.bin", flags) ==
+           V{"/app/dcp_run", "/d/CUSA/eboot.bin", "--render", "--window", "--renderer", "auto", "--size", "1280x720"}));
+    // macOS: the script gets the folder; the launcher's own --renderer is dropped (the script picks OpenGL, the only backend there).
+    CHECK((dcp::launcher::game_command(true, "/app", "/src", "/d/CUSA/eboot.bin", flags) ==
+           V{"/src/play-mac.sh", "/d/CUSA", "--render", "--window", "--size", "1280x720"}));
+    CHECK((dcp::launcher::game_command(true, "/app", "/src", "eboot.bin", {"--4k"}) == V{"/src/play-mac.sh", ".", "--4k"}));
+
+    // What the status line says while the script runs, from the end of the log (the latest phase marker wins).
+    using dcp::launcher::play_phase;
+    CHECK(play_phase({}).empty());                                              // no markers: nothing to say (plain dcp_run)
+    CHECK(play_phase({"eboot: base 0x1", "game output"}).empty());
+    CHECK(play_phase({"+ cmake -S /s -B /w/tools -G Ninja", "+ cmake --build /w/tools --target dcp_recompile -j10"}) ==
+          "Preparing the recompiler...");
+    CHECK(play_phase({"+ cmake --build /w/tools --target dcp_recompile -j10", "[3/9] Building CXX object x", "play-mac: recompiling your dump (about 2 minutes)",
+                      "+ /w/tools/dcp_recompile /d/eboot.bin /w/gen --name eboot"}) == "Recompiling your game (first run only, a few minutes)...");
+    CHECK(play_phase({"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10", "[12/338] Building CXX object y"}) ==
+          "Building the game for this Mac...");
+    CHECK(play_phase({"+ cmake --build /w/run --target dcp_run -j10", "+ /w/run/dcp_run /d/eboot.bin --window --renderer gl", "eboot: base 0x1"}).empty());  // running
     if (!g_fail) std::puts("launcher platform: all tests passed");
     return g_fail ? 1 : 0;
 }

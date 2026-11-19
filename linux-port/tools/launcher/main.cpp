@@ -469,29 +469,37 @@ void set_env(const char* k, const std::string& v) {  // "" removes it; inherited
 }
 
 bool start_game(Game& g, const Settings& s, const std::string& user, const std::string& log_path) {
-    std::string exe = exe_dir() + "/dcp_run";
-    if (access(exe.c_str(), X_OK) != 0) { g.error = "dcp_run not found next to the launcher (" + exe + ")"; return false; }
     std::string eboot = find_ci(s.dump, "eboot.bin");
     if (eboot.empty()) { g.error = "eboot.bin not found in " + s.dump; return false; }
-    std::vector<std::string> args = {exe, eboot, "--render", "--window"};
-    if (s.fullscreen) args.push_back("--fullscreen");
-    if (s.uhd) args.push_back("--4k");
-    args.push_back("--renderer"), args.push_back(s.renderer);
-    if (s.vsync) args.push_back("--vsync");
-    if (s.fsr && !s.uhd) args.push_back("--fsr");
+    std::vector<std::string> flags = {"--render", "--window"};
+    if (s.fullscreen) flags.push_back("--fullscreen");
+    if (s.uhd) flags.push_back("--4k");
+    flags.push_back("--renderer"), flags.push_back(s.renderer);
+    if (s.vsync) flags.push_back("--vsync");
+    if (s.fsr && !s.uhd) flags.push_back("--fsr");
     if (s.sharpening > 0) {
         char sh[32];
         std::snprintf(sh, sizeof sh, "%.2f", 2.0f * (1.0f - s.sharpening / 100.0f));
-        args.push_back("--sharpen"), args.push_back(sh);
+        flags.push_back("--sharpen"), flags.push_back(sh);
     }
     if (!s.uhd) {
         const char* sc = s.render_res == "720p"  ? "0.6667"
                        : s.render_res == "1440p" ? "1.3333"
                        : s.render_res == "2160p" ? "2"
                        : s.render_res == "window" ? "window" : nullptr;
-        if (sc) args.push_back("--scale"), args.push_back(sc);
+        if (sc) flags.push_back("--scale"), flags.push_back(sc);
     }
-    args.push_back("--size"), args.push_back(std::to_string(s.width) + "x" + std::to_string(s.height));
+    flags.push_back("--size"), flags.push_back(std::to_string(s.width) + "x" + std::to_string(s.height));
+#ifdef __APPLE__
+    // The game code must be recompiled from the dump (play-mac.sh, in the source tree this launcher was built from).
+    std::vector<std::string> args = dcp::launcher::game_command(true, exe_dir(), DCP_SOURCE_DIR, eboot, flags);
+    std::string exe = args[0];
+    if (access(exe.c_str(), X_OK) != 0) { g.error = "play-mac.sh not found (" + exe + ")"; return false; }
+#else
+    std::vector<std::string> args = dcp::launcher::game_command(false, exe_dir(), "", eboot, flags);
+    std::string exe = args[0];
+    if (access(exe.c_str(), X_OK) != 0) { g.error = "dcp_run not found next to the launcher (" + exe + ")"; return false; }
+#endif
     std::vector<char*> argv;
     for (std::string& a : args) argv.push_back(a.data());
     argv.push_back(nullptr);
@@ -2651,7 +2659,14 @@ int main(int argc, char** argv) {
             const bool hints = input == Input::Pad && !pad.pads.empty();
             const float line = ImGui::GetTextLineHeight(), gap = ImGui::GetStyle().ItemSpacing.y;
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (play.y - (hints ? 2 * line + gap : line)) * 0.5f);
-            if (running) ImGui::TextColored(kGood, "The game is running.");
+            // While play-mac.sh prepares the game (macOS) the log says which step it is on.
+            static std::string phase;
+            static double phase_t = -1;
+            if (running) {
+                if (ImGui::GetTime() - phase_t > 0.5) phase = dcp::launcher::play_phase(log_tail(log_path, 60)), phase_t = ImGui::GetTime();
+            } else phase.clear(), phase_t = -1;
+            if (running && !phase.empty()) ImGui::TextColored(kDim, "%s", phase.c_str());
+            else if (running) ImGui::TextColored(kGood, "The game is running.");
             else if (!game.error.empty()) ImGui::TextColored(kBad, "%s", game.error.c_str());
             else if (game.failed) {
                 ImGui::TextColored(kBad, "The game exited with code %lu.", (unsigned long)game.exit_code);
