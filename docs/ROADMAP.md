@@ -43,7 +43,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 
 ## Phase 6: Delivery
 - [x] T6d: one-command pipeline for the user's own dump: `linux-port/play-mac.sh <dump folder>` (from scratch 235 s, then 8 s)
-- [ ] Launcher (tools/launcher, ImGui: dump folder, controls, display options, online) on macOS: it still uses xdg-open, /proc/self/exe and the AppImage updater
+- [x] Launcher (tools/launcher, ImGui) builds and opens on macOS (spawn, `open`, exe path through tools/launcher/platform.h)
+- [ ] Launcher on macOS: Play must run the recompile pipeline (play-mac.sh) and show its progress; no AppImage updater or Steam bits; check every page (controls, display, online)
 - [ ] Packaging and docs
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)
