@@ -172,6 +172,14 @@ static void test_computed_jump_into_function() {
     CHECK(f.has_indirect_jump);                       // the jump cannot be resolved statically
     CHECK(f.blocks.count(0x100a) == 1);               // but the code after it is decoded, so a switch can target it
     CHECK(f.blocks.at(0x100a).insns.size() == 2);
+    // Compilers pad jump targets with a nop: the code after the padding is a case of its own, even when the sweep reaches it by
+    // falling through the padding (a call to the middle of such a function crashed the game before).
+    const uint8_t padded[] = {0xff, 0xe0,                            // 0x1000 jmp rax
+                              0x0f, 0x1f, 0x44, 0x00, 0x00,          // 0x1002 nop dword ptr [rax+rax*1+0]
+                              0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};   // 0x1007 mov eax, 1; ret
+    Function pf = discover_function(padded, sizeof padded, 0x1000, 0x1000, sizeof padded);
+    CHECK(pf.has_indirect_jump && pf.blocks.count(0x1002) && pf.blocks.count(0x1007));
+    CHECK(pf.blocks.at(0x1002).insns.size() == 1 && pf.blocks.at(0x1007).insns.size() == 2);
     Function g = discover_function(code, 0x10, 0x1000, 0x1000, 0x10);  // a function that ends right after the case: nothing to sweep past
     CHECK(g.blocks.count(0x100a) == 1);
 }

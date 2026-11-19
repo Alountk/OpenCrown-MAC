@@ -171,6 +171,7 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
             insns[a] = in;
             run.push_back(in);
             const uint64_t next = a + in.len;
+            if (in.mnemonic == "nop") leaders.insert(next);  // padding: what follows is aligned because something jumps to it
             if (in.flow == Flow::Ret || in.flow == Flow::Trap) break;
             if (in.flow == Flow::Call) {
                 if (in.direct) fn.calls.insert(in.target);
