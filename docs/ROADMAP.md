@@ -33,7 +33,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [ ] Input and the remaining filesystem paths on macOS (game files location, logs)
 - [ ] Menu boot, then first level
 - [x] Online on one Mac: `play-mac-online-test.sh` starts a local lobby and two game copies (keyboard + gamepad); a room created in copy A is joined from copy B by code (`DCP_JOIN_CODE`), checked by hand
-- [ ] Online: join a friend's room through the launcher friends list (not tried yet)
+- [x] Online: friend request by code (two launchers, one per account), then join the friend's room from the game, checked by hand on one Mac
 
 ## Phase 5: Rendering
 - [x] dcp_run --render builds and runs on arm64 (SDL3, GL 4.1 over Metal); capture sees the draws
