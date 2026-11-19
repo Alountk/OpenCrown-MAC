@@ -28,7 +28,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [ ] T5f3: skip_offers / confirm_button / own_camera as overrides of recompiled functions
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
-- [ ] Audio (CoreAudio opens, mixer keeps pace; confirm by ear), input, save data, filesystem paths on macOS
+- [ ] Audio (CoreAudio, clean by ear), input, save data, filesystem paths on macOS
 - [ ] Menu boot, then first level
 
 ## Phase 5: Rendering

@@ -1,5 +1,5 @@
 // dcp_run's SDL3 audio sink: mixes every open AudioOut port down to float stereo 48 kHz into one SDL audio stream.
-// submit() blocks while more than the queue target is queued, which is what paces CRI's mixer thread.
+// submit() returns at real-time pace (like the PS4); a cushion of silence in the SDL stream absorbs jitter.
 #include "sdl_audio.h"
 
 #include <SDL3/SDL.h>
@@ -46,11 +46,24 @@ public:
             for (int f = 0; f < frames; ++f, ++tone_pos_)
                 mix_[f * 2] = mix_[f * 2 + 1] = 0.25f * std::sin(6.2831853f * 440.0f * float(tone_pos_ % 48000) / 48000.0f);
         int bytes = int(mix_.size() * sizeof(float));
-        int queued = SDL_GetAudioStreamQueued(s_);
-        uint64_t t0 = SDL_GetTicksNS();
-        while (queued > target_) SDL_Delay(1), queued = SDL_GetAudioStreamQueued(s_);
+        if (raw_) std::fwrite(mix_.data(), 1, size_t(bytes), raw_);  // DCP_AUDIO_RAW=path: f32 stereo 48 kHz, what SDL gets
+        if (!primed_) {  // fixed cushion of silence: the queue then hovers around target_ while calls keep real-time pace
+            std::vector<float> pad(size_t(target_ / 4), 0.0f);
+            SDL_PutAudioStreamData(s_, pad.data(), int(pad.size() * sizeof(float)));
+            primed_ = true;
+        }
         SDL_PutAudioStreamData(s_, mix_.data(), bytes);
-        stat(queued, bytes, SDL_GetTicksNS() - t0);
+        int queued = SDL_GetAudioStreamQueued(s_);
+        // Like the PS4 (and the paced sink), the call returns when this batch's time has elapsed, not when the queue is
+        // short: CRI's streaming threads misbehave (dropouts in the voices) if the mixer runs ahead of real time. A
+        // gentle correction toward the cushion keeps the host clock and the device clock from drifting apart.
+        uint64_t now = SDL_GetTicksNS();
+        int64_t step = int64_t(1000000000ll) * frames / 48000;
+        int64_t err_ns = int64_t(queued - target_) / 8 * 1000000000ll / 48000;  // queue surplus in time
+        if (next_ == 0 || int64_t(now) - next_ > 100000000ll) next_ = int64_t(now);
+        next_ += step + err_ns / 64;
+        if (next_ > int64_t(now)) SDL_DelayPrecise(uint64_t(next_ - int64_t(now)));
+        stat(queued, bytes, SDL_GetTicksNS() - now);
     }
 
 private:
@@ -81,7 +94,10 @@ private:
     int target_;  // bytes (f32 stereo)
     bool log_ = std::getenv("DCP_AUDIO_LOG") != nullptr;
     bool tone_ = std::getenv("DCP_AUDIO_TONE") != nullptr;
+    FILE* raw_ = std::getenv("DCP_AUDIO_RAW") ? std::fopen(std::getenv("DCP_AUDIO_RAW"), "wb") : nullptr;
     uint64_t tone_pos_ = 0;
+    bool primed_ = false;
+    int64_t next_ = 0;
     int n_ = 0, empty_ = 0, qmin_ = 0, qmax_ = 0, under_secs_ = 0;
     uint64_t t0_ = 0, wait_ = 0, start_ = 0, last_under_log_ = 0;
     int ch_[8] = {};
