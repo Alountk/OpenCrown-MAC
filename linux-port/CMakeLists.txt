@@ -257,6 +257,8 @@ target_link_libraries(test_lobby PRIVATE dcp_net)
 add_test(NAME lobby COMMAND test_lobby)
 add_executable(test_touch tests/test_touch.cpp)  # touch screen / Steam Deck input logic (header only)
 add_test(NAME touch COMMAND test_touch)
+add_executable(test_yield_throttle tests/test_yield_throttle.cpp)  # busy-wait throttle (header only)
+add_test(NAME yield_throttle COMMAND test_yield_throttle)
 add_executable(test_texwatch tests/test_texwatch.cpp)  # concurrent faults on one protected page
 target_link_libraries(test_texwatch PRIVATE dcp_texwatch)
 add_test(NAME texwatch COMMAND test_texwatch)

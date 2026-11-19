@@ -3,6 +3,7 @@
 // fill with pointers to our own objects. Priorities, affinity and scheduling policy are recorded and ignored.
 #include <atomic>
 #include <csetjmp>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <mutex>
@@ -14,6 +15,7 @@
 
 #include "platform/compat.h"
 #include "../common.h"
+#include "yield_throttle.h"
 
 namespace dcp::hle {
 namespace {
@@ -159,8 +161,22 @@ DCP_SYSV int32_t scePthreadCancel(Thread* t) {
     DCP_HLE_LOG("scePthreadCancel", "'%s' ignored (no async cancel on the host)", t ? t->name : "?");
     return kOk;
 }
-DCP_SYSV int32_t scePthreadYield() { return ::sched_yield(), kOk; }
-DCP_SYSV int32_t sched_yield() { return ::sched_yield(), 0; }
+// A busy wait built on yield burns a core: throttle threads that keep yielding (yield_throttle.h).
+void throttled_yield() {
+    static const bool off = [] { const char* v = std::getenv("DCP_YIELD_THROTTLE"); return v && v[0] == '0'; }();  // diagnosis switch
+    if (off) return (void)::sched_yield();
+    thread_local YieldThrottle throttle;
+    timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (throttle.next(uint64_t(now.tv_sec) * 1000000000ull + uint64_t(now.tv_nsec)) == YieldThrottle::Action::Yield) {
+        ::sched_yield();
+    } else {
+        const timespec nap{0, long(YieldThrottle::kSleepNs)};
+        nanosleep(&nap, nullptr);
+    }
+}
+DCP_SYSV int32_t scePthreadYield() { return throttled_yield(), kOk; }
+DCP_SYSV int32_t sched_yield() { return throttled_yield(), 0; }
 DCP_SYSV int32_t scePthreadSetprio(Thread* t, int32_t p) { return t->attr.prio = p, kOk; }
 DCP_SYSV int32_t scePthreadGetprio(Thread* t, int32_t* p) { return *p = t->attr.prio, kOk; }
 DCP_SYSV int32_t scePthreadSetaffinity(Thread* t, uint64_t m) { return t->attr.affinity = m, kOk; }
