@@ -18,24 +18,27 @@ bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_
     const Insn& j = run.back();
     if (!j.nops || !gpr(j.ops[0])) return false;
     const int R = j.ops[0].reg;
-    int T = kNoReg, I = kNoReg, i = int(run.size()) - 2;
-    for (; i >= 0; --i) {  // add R, T
+    int T = kNoReg, I = kNoReg, S = kNoReg, i = int(run.size()) - 2;
+    for (; i >= 0; --i) {  // add R, S
         const Insn& x = run[size_t(i)];
         if (x.mnemonic == "add" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == R && x.ops[0].bits == 64 && gpr(x.ops[1])) {
-            T = x.ops[1].reg;
+            S = x.ops[1].reg;
             break;
         }
     }
-    if (T == kNoReg) return false;
+    if (S == kNoReg) return false;
     int movsxd_at = -1;
-    for (--i; i >= 0; --i) {  // movsxd R, dword ptr [T + I*4]
+    for (--i; i >= 0; --i) {  // movsxd R, [S + I*4] (table base in S) or movsxd S, [R + I*4] (table base in R, the jump register)
         const Insn& x = run[size_t(i)];
-        if (x.mnemonic == "movsxd" && x.nops == 2 && gpr(x.ops[0]) && x.ops[0].reg == R && x.ops[1].kind == OpKind::Mem &&
-            x.ops[1].base == T && x.ops[1].index != kNoReg && x.ops[1].scale == 4 && x.ops[1].disp == 0) {
-            I = x.ops[1].index;
-            movsxd_at = i;
-            break;
-        }
+        if (x.mnemonic != "movsxd" || x.nops != 2 || !gpr(x.ops[0]) || x.ops[1].kind != OpKind::Mem || x.ops[1].index == kNoReg ||
+            x.ops[1].scale != 4 || x.ops[1].disp != 0)
+            continue;
+        const bool base_in_s = x.ops[0].reg == R && x.ops[1].base == S, base_in_r = x.ops[0].reg == S && x.ops[1].base == R;
+        if (!base_in_s && !base_in_r) continue;
+        T = base_in_s ? S : R;
+        I = x.ops[1].index;
+        movsxd_at = i;
+        break;
     }
     if (I == kNoReg) return false;
     uint64_t table = 0;
@@ -67,10 +70,13 @@ bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_
         return true;
     };
     int cmp_at = -1;
+    bool inclusive = true;  // `ja N` admits indices 0..N; `jae N` (jnb) admits 0..N-1
     (void)lea_at;
     for (int k = movsxd_at - 1; k >= 1 && cmp_at < 0; --k) {
         const Insn& x = run[size_t(k)];
-        if (x.mnemonic != "ja" && x.mnemonic != "jnbe") continue;
+        const bool above = x.mnemonic == "ja" || x.mnemonic == "jnbe", at_least = x.mnemonic == "jae" || x.mnemonic == "jnb";
+        if (!above && !at_least) continue;
+        inclusive = above;
         for (int m = k - 1; m >= 0; --m) {
             const Insn& c = run[size_t(m)];
             if (!writes_flags(c.mnemonic)) continue;
@@ -107,8 +113,8 @@ bool recover_jump_table(const std::vector<Insn>& run, const uint8_t* code, size_
     }
     const Insn& c = run[size_t(cmp_at)];
     const uint64_t mask = c.ops[0].bits >= 64 ? ~0ull : (1ull << c.ops[0].bits) - 1;
-    const uint64_t count = (uint64_t(c.ops[1].imm) & mask) + 1;
-    if (count > 4096) return false;
+    const uint64_t count = (uint64_t(c.ops[1].imm) & mask) + (inclusive ? 1 : 0);
+    if (count == 0 || count > 4096) return false;
     if (table < code_base || table + 4 * count > code_base + code_size) return false;
     out = JumpTable{};
     out.table = table;
@@ -217,7 +223,26 @@ Function discover_function(const uint8_t* code, size_t code_size, uint64_t code_
         pending = std::move(still);
         if (progress) drain();  // the newly found cases may hold more jumps
     }
-    if (!pending.empty()) fn.has_indirect_jump = true;
+    if (!pending.empty()) {
+        fn.has_indirect_jump = true;
+        // An indirect jump that could not be resolved (memcpy-style dispatch through a table of absolute addresses, a computed
+        // goto) lands on code that nothing else reaches. Decode what the walk skipped: every byte not yet covered starts a
+        // walk of its own. Data inside the function decodes into nonsense that is never jumped to; failures there are not errors.
+        const bool bad = fn.has_bad_bytes, failed = fn.decode_failed, off_end = fn.fell_off_end;
+        const uint64_t bad_at = fn.bad_at;
+        for (uint64_t a = start; a < end;) {
+            auto it = insns.find(a);
+            if (it != insns.end()) {
+                a += it->second.len;
+                continue;
+            }
+            leaders.insert(a);
+            work.push_back(a);
+            drain();
+            if (!insns.count(a)) ++a;  // not decodable: skip one byte
+        }
+        fn.has_bad_bytes = bad, fn.decode_failed = failed, fn.fell_off_end = off_end, fn.bad_at = bad_at;
+    }
 
     for (uint64_t l : leaders) {
         if (!insns.count(l)) continue;

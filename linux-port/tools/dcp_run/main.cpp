@@ -1,6 +1,7 @@
 // dcp_run <eboot.bin> [--dry] [--input script.txt] [--frames N] [--render] [--window] [--fullscreen] [--size WxH] [--shot out.png] [--renderer auto|gpu|gl]: load the user's eboot (and its sce_module/libc.prx, if present) into this process,
 // relocate, bind imports to the user's libc exports, HLE shims or logging stubs, and (without --dry) run libc's
 // module_start and the eboot entry until the first fault / exit, reporting where and why.
+#include <execinfo.h>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -263,6 +264,8 @@ void on_fault(int sig, siginfo_t* si, void*) {
     std::fprintf(stderr, "fault: signal %d at ", sig);
     print_addr("address", reinterpret_cast<uint64_t>(si->si_addr));
     std::fprintf(stderr, "\n");
+    void* frames[24];  // the recompiled functions are named f_<hex>, so the host backtrace shows the guest call chain
+    backtrace_symbols_fd(frames, backtrace(frames, 24), 2);
     finish(128 + sig);
 }
 

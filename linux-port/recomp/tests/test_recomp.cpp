@@ -121,6 +121,22 @@ static void test_jump_table() {
     CHECK(f.blocks.size() == 6 && f.blocks.count(0x1018) && f.blocks.count(0x1024) && f.blocks.count(0x1015));
     CHECK(f.blocks.at(0x1005).succ.size() == 3);  // the jump block reaches every case
 
+    // `cmp edi,3; jae default` bounds the index to 3 entries as well (memcpy's size dispatch is written that way)
+    uint8_t jae[sizeof code];
+    std::memcpy(jae, code, sizeof code);
+    jae[2] = 0x03, jae[3] = 0x73;
+    Function g = discover_function(jae, sizeof jae, 0x1000, 0x1000, sizeof jae);
+    CHECK(g.jump_tables.size() == 1 && g.jump_tables.count(0x1013) && g.jump_tables.at(0x1013).targets.size() == 3);
+
+    // Table base and result share a register: movsxd rdi,[rcx+rdi*4]; add rcx,rdi; jmp rcx (what memcpy's size dispatch does)
+    const uint8_t shared[] = {0x83, 0xff, 0x03, 0x73, 0x10, 0x48, 0x8d, 0x0d, 0x20, 0x00, 0x00, 0x00, 0x48, 0x63, 0x3c, 0xb9,
+                              0x48, 0x01, 0xf9, 0xff, 0xe1,
+                              0x31, 0xc0, 0xc3, 0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3, 0xb8, 0x02, 0x00, 0x00, 0x00, 0xc3,
+                              0xb8, 0x03, 0x00, 0x00, 0x00, 0xc3, 0xcc, 0xcc,
+                              0xec, 0xff, 0xff, 0xff, 0xf2, 0xff, 0xff, 0xff, 0xf8, 0xff, 0xff, 0xff};
+    Function h = discover_function(shared, sizeof shared, 0x1000, 0x1000, sizeof shared);
+    CHECK(h.jump_tables.size() == 1 && h.jump_tables.count(0x1013) && h.jump_tables.at(0x1013).targets.size() == 3);
+
     // The same jump without the bounds check cannot be resolved: it stays an indirect jump.
     const uint8_t unbounded[] = {0x48, 0x8d, 0x0d, 0x0b, 0x00, 0x00, 0x00, 0x48, 0x63, 0x04, 0xb9, 0x48, 0x01, 0xc8, 0xff, 0xe0};
     Function u = discover_function(unbounded, sizeof unbounded, 0x2000, 0x2000, sizeof unbounded);
@@ -142,6 +158,22 @@ static void test_hoisted_table_base() {
     CHECK(f.jump_tables.size() == 1 && f.jump_tables.count(0x1015));
     CHECK(f.jump_tables.at(0x1015).table == 0x102c && f.jump_tables.at(0x1015).targets.size() == 3);
     CHECK(f.blocks.count(0x101a) && f.blocks.count(0x1020) && f.blocks.count(0x1026) && f.blocks.count(0x1017));
+}
+
+static void test_computed_jump_into_function() {
+    // memcpy-style dispatch: jmp [table + rdi*8] with a table of absolute addresses of labels inside the function. The targets are only
+    // reachable through that jump, so they have to be found by sweeping the code the control-flow walk did not reach.
+    const uint8_t code[] = {0x48, 0x8d, 0x0d, 0x0e, 0x00, 0x00, 0x00,   // 0x1000 lea rcx, [rip+0x0e]   (table at 0x1015)
+                            0xff, 0x24, 0xf9,                           // 0x1007 jmp qword ptr [rcx+rdi*8]
+                            0xb8, 0x07, 0x00, 0x00, 0x00, 0xc3,         // 0x100a case 0: mov eax, 7; ret
+                            0xcc, 0xcc, 0xcc, 0xcc, 0xcc};              // 0x1010 padding
+    // (the table itself is not decoded: it is data, and no instruction of the walk reaches it)
+    Function f = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    CHECK(f.has_indirect_jump);                       // the jump cannot be resolved statically
+    CHECK(f.blocks.count(0x100a) == 1);               // but the code after it is decoded, so a switch can target it
+    CHECK(f.blocks.at(0x100a).insns.size() == 2);
+    Function g = discover_function(code, 0x10, 0x1000, 0x1000, 0x10);  // a function that ends right after the case: nothing to sweep past
+    CHECK(g.blocks.count(0x100a) == 1);
 }
 
 static void test_declarations() {
@@ -255,6 +287,7 @@ int main() {
     test_x87_operands();
     test_jump_table();
     test_hoisted_table_base();
+    test_computed_jump_into_function();
     test_declarations();
     test_eh_frame();
     if (g_fail) return 1;

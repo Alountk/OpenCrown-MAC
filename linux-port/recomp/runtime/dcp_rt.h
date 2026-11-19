@@ -1019,6 +1019,67 @@ template <int B> inline void vptest(const Vec& a, const Vec& b, Flags& f) {
     for (int i = 0; i < B / 64; ++i) both |= a.q[i] & b.q[i], notb |= ~a.q[i] & b.q[i];
     f.zf = both == 0, f.cf = notb == 0, f.of = f.sf = f.pf = f.af = false;
 }
+// pcmpistri / pcmpistrm: SSE4.2 implicit-length string compare. imm8: bits 1:0 element format (u8, u16, s8, s16), bits 3:2
+// aggregation (equal any, ranges, equal each, equal ordered), bits 5:4 polarity, bit 6 output select. Returns IntRes2 and sets
+// CF = IntRes2 != 0, ZF = b has a null element, SF = a has a null element, OF = IntRes2[0]; AF and PF are cleared.
+inline u32 pcmpistr(const Vec& a, const Vec& b, int imm, Flags& f) {
+    const bool wide = imm & 1, sgn = imm & 2;
+    const int n = wide ? 8 : 16, agg = (imm >> 2) & 3, pol = (imm >> 4) & 3;
+    auto elem = [&](const Vec& v, int i) -> i64 {
+        return wide ? (sgn ? i64(lane<i16>(v, i)) : i64(lane<u16>(v, i))) : (sgn ? i64(lane<i8>(v, i)) : i64(lane<u8>(v, i)));
+    };
+    auto length = [&](const Vec& v) {
+        int l = 0;
+        while (l < n && (wide ? lane<u16>(v, l) : lane<u8>(v, l)) != 0) ++l;
+        return l;
+    };
+    const int la = length(a), lb = length(b);
+    // BoolRes for element i of a against element j of b, with the invalid-element rules of the aggregation mode
+    auto cmp = [&](int i, int j, int op) {  // op 0: equal, 1: >= (a[i] <= b[j]), 2: <= (b[j] <= a[i])
+        const bool ai = i < la, bj = j < lb;
+        if (!ai || !bj) {
+            if (agg == 2) return !ai && !bj;
+            if (agg == 3) return !ai;
+            return false;
+        }
+        const i64 x = elem(a, i), y = elem(b, j);
+        return op == 0 ? x == y : op == 1 ? y >= x : y <= x;
+    };
+    u32 r1 = 0;
+    for (int j = 0; j < n; ++j) {
+        bool v = false;
+        if (agg == 0)
+            for (int i = 0; i < n; ++i) v |= cmp(i, j, 0);
+        else if (agg == 1)
+            for (int i = 0; i + 1 < n; i += 2) v |= cmp(i, j, 1) && cmp(i + 1, j, 2);
+        else if (agg == 2)
+            v = cmp(j, j, 0);
+        else {
+            v = true;
+            for (int k = 0; j + k < n; ++k) v = v && cmp(k, j + k, 0);
+        }
+        r1 |= u32(v) << j;
+    }
+    const u32 all = (1u << n) - 1, valid = lb >= n ? all : (1u << lb) - 1;
+    const u32 r2 = pol == 1 ? ~r1 & all : pol == 3 ? (r1 ^ valid) & all : r1;
+    f.cf = r2 != 0, f.zf = lb < n, f.sf = la < n, f.of = r2 & 1, f.af = f.pf = false;
+    return r2;
+}
+inline u32 pcmpistri(const Vec& a, const Vec& b, int imm, Flags& f) {
+    const u32 r = pcmpistr(a, b, imm, f);
+    const int n = (imm & 1) ? 8 : 16;
+    if (!r) return u32(n);
+    return (imm & 0x40) ? u32(31 - __builtin_clz(r)) : u32(__builtin_ctz(r));
+}
+inline Vec pcmpistrm(const Vec& a, const Vec& b, int imm, Flags& f) {
+    const u32 r = pcmpistr(a, b, imm, f);
+    Vec v = vzero();
+    if (!(imm & 0x40)) return v.q[0] = r, v;
+    const bool wide = imm & 1;
+    for (int i = 0; i < (wide ? 8 : 16); ++i)
+        if ((r >> i) & 1) wide ? setlane<u16>(v, i, 0xffff) : setlane<u8>(v, i, 0xff);
+    return v;
+}
 // vcvtdq2pd: the low B/64 int32 lanes of the source become doubles
 template <int B> inline Vec vpcvtdq2pd(const Vec& a) {
     Vec r = vzero();

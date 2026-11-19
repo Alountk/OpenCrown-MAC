@@ -185,6 +185,25 @@ static void test_complete_functions() {
     CHECK(complete_functions(c).size() == 1);
 }
 
+static void test_tail_jump_into_a_function() {
+    // A jmp into the middle of another function (a shared tail) makes that address a function of its own. The function it
+    // lands in keeps its whole declared range, so its own blocks past that address are still lifted.
+    LoadedModule m;
+    m.image.assign(0x300, 0xcc);
+    const uint8_t a[] = {0x90, 0x90, 0x90, 0x90, 0xc3, 0x90, 0x90, 0xc3};  // 0x100: nops, ret at 0x104, more code up to 0x107
+    const uint8_t b[] = {0xe9, 0xff, 0xfe, 0xff, 0xff};                     // 0x200: jmp 0x104
+    std::memcpy(m.image.data() + 0x100, a, sizeof a);
+    std::memcpy(m.image.data() + 0x200, b, sizeof b);
+    m.entry = 0x100;
+    m.functions = {{0x100, 8}, {0x200, 8}};
+    const std::vector<FdeRange> all = complete_functions(m);
+    std::vector<uint64_t> starts;
+    for (const FdeRange& r : all) starts.push_back(r.start);
+    CHECK((starts == std::vector<uint64_t>{0x100, 0x104, 0x200}));
+    CHECK(all[0].size == 8);  // not cut at 0x104
+    CHECK(all[1].size == 4);  // the new entry ends where the function it lies in ends
+}
+
 static void test_repo_guard() {
     // Generated sources must not end up in a git work tree (they are derived from the user's game files).
     const char* t = getenv("TMPDIR");
@@ -209,6 +228,7 @@ int main() {
     test_emit_and_run();
     test_repo_guard();
     test_complete_functions();
+    test_tail_jump_into_a_function();
     if (g_fail) return std::fprintf(stderr, "module: %d check(s) failed\n", g_fail), 1;
     std::puts("module: all tests passed");
     return 0;

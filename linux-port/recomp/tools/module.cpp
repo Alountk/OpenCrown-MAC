@@ -69,10 +69,18 @@ std::vector<FdeRange> complete_functions(const LoadedModule& m) {
         if (a < m.image.size() && !inside_fde(a)) starts.insert(a);
 
     auto size_of = [&](uint64_t s) {
+        // The declared function that covers s (s itself or one it lies inside): an entry added in the middle of a function keeps
+        // the rest of that function as its range, and entries inside a declared range never cut another range short.
+        uint64_t cover_end = 0;
+        auto cd = fde.upper_bound(s);
+        if (cd != fde.begin()) {
+            --cd;
+            if (s < cd->first + cd->second) cover_end = cd->first + cd->second;
+        }
         auto next = starts.upper_bound(s);
+        while (cover_end && next != starts.end() && *next < cover_end && !fde.count(*next)) ++next;
         const uint64_t limit = next == starts.end() ? m.image.size() : *next;
-        auto d = fde.find(s);
-        const uint64_t want = d != fde.end() ? d->second : kMaxExtra;
+        const uint64_t want = cover_end ? cover_end - s : kMaxExtra;
         return std::min<uint64_t>(want, limit - s);
     };
     std::map<uint64_t, uint64_t> scanned;  // start -> the size it was scanned with
@@ -89,7 +97,10 @@ std::vector<FdeRange> complete_functions(const LoadedModule& m) {
                 if (t < m.image.size() && !starts.count(t) && !inside_fde(t)) starts.insert(t), changed = true;
             };
             for (uint64_t t : fn.calls) consider(t);
-            for (uint64_t t : fn.tail_jumps) consider(t);
+            // A direct jmp into the middle of a declared function is a shared tail: its target is an entry of its own (unlike a
+            // call target there, which could be a misdecoded one).
+            for (uint64_t t : fn.tail_jumps)
+                if (t < m.image.size() && !starts.count(t)) starts.insert(t), changed = true;
             changed = changed || false;
         }
         // a new start splits the range of its predecessor: sizes change, so rescan

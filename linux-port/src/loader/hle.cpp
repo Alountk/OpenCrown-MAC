@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include <dlfcn.h>
+#include <execinfo.h>
 #include <sys/mman.h>
 
 #include "nid.h"
@@ -114,7 +116,12 @@ void foreign_import(dcp::rt::Ctx* c, uint64_t target) {
         c->r[RSP] += 8;  // the callee's ret
         return;
     }
-    std::fprintf(stderr, "dcp: call to 0x%llx, which is neither recompiled code nor an import\n", (unsigned long long)target);
+    std::fprintf(stderr, "dcp: call to 0x%llx (guest return address 0x%llx), which is neither recompiled code nor an import\n",
+                 (unsigned long long)target, (unsigned long long)*reinterpret_cast<uint64_t*>(c->r[dcp::rt::RSP]));
+    Dl_info di;  // a host function pointer without a registered thunk shows its name here
+    if (dladdr(reinterpret_cast<void*>(target), &di) && di.dli_sname) std::fprintf(stderr, "dcp: that address is host symbol %s\n", di.dli_sname);
+    void* frames[24];  // the recompiled functions are named f_<module>_<hex>: the host backtrace is the guest call chain
+    backtrace_symbols_fd(frames, backtrace(frames, 24), 2);
     std::abort();
 }
 }  // namespace

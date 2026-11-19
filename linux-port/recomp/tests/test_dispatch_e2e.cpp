@@ -71,6 +71,41 @@ static int two_modules() {
     return 0;
 }
 
+// A computed jump through a table of absolute addresses (memcpy's size dispatch): both labels sit inside the function.
+static int computed_jump() {
+    std::vector<uint8_t> img(0x2000, 0xcc);
+    const uint8_t f[] = {0x48, 0x8d, 0x0d, 0x1e, 0x00, 0x00, 0x00,      // 0x1000 lea rcx, [rip+0x1e]   (table at 0x1025)
+                         0xff, 0x24, 0xf9,                              // 0x1007 jmp qword ptr [rcx+rdi*8]
+                         0xb8, 0x0a, 0x00, 0x00, 0x00, 0xc3,            // 0x100a case 0: mov eax, 10; ret
+                         0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,            // 0x1010..0x1015
+                         0xb8, 0x14, 0x00, 0x00, 0x00, 0xc3};           // 0x1016 case 1: mov eax, 20; ret
+    std::memcpy(img.data() + 0x1000, f, sizeof f);
+    // the table at 0x1025.. holds absolute addresses, as the loader's relocation leaves them
+    const uint64_t t0 = reinterpret_cast<uint64_t>(img.data()) + 0x100a, t1 = reinterpret_cast<uint64_t>(img.data()) + 0x1016;
+    std::memcpy(img.data() + 0x1025, &t0, 8);
+    std::memcpy(img.data() + 0x102d, &t1, 8);
+    const std::set<uint64_t> fns{0x1000};
+    std::string code = lift_prelude() + lift_declarations(fns);
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1000, 0x25), fns).code + lift_function_table(fns);
+    void* lib = build_and_load(code);
+    if (!lib) return 1;
+    auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register"));
+    auto run = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1000"));
+    if (!reg || !run) return std::fprintf(stderr, "e2e: missing symbols for the computed jump\n"), 1;
+    reg(reinterpret_cast<unsigned long long>(img.data()), img.size());
+    alignas(16) static uint8_t stack[256];
+    for (int which = 0; which < 2; ++which) {
+        Ctx c{};
+        const uint64_t sp = reinterpret_cast<uint64_t>(stack) + sizeof stack;
+        c.r[dcp::rt::RSP] = sp - 8;
+        c.r[dcp::rt::RDI] = uint64_t(which);
+        run(&c);
+        if (uint32_t(c.r[dcp::rt::RAX]) != (which ? 20u : 10u) || c.r[dcp::rt::RSP] != sp)
+            return std::fprintf(stderr, "e2e: computed jump %d returned %llu\n", which, (unsigned long long)c.r[dcp::rt::RAX]), 1;
+    }
+    return 0;
+}
+
 int main() {
     std::vector<uint8_t> img(0x2000, 0xcc);
     // 0x1000: lea rcx,[rip+0xf9] (-> 0x1100); call rcx; add eax,1; ret
@@ -106,7 +141,7 @@ int main() {
     int fail = 0;
     if (uint32_t(c.r[dcp::rt::RAX]) != 8) std::fprintf(stderr, "e2e: eax = %llu, expected 8\n", (unsigned long long)c.r[dcp::rt::RAX]), ++fail;
     if (c.r[dcp::rt::RSP] != sp) std::fprintf(stderr, "e2e: rsp not restored\n"), ++fail;
-    if (fail || two_modules()) return 1;
+    if (fail || two_modules() || computed_jump()) return 1;
     std::puts("dispatch e2e: ok");
     return 0;
 }
