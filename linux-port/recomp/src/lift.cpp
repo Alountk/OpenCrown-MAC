@@ -956,14 +956,15 @@ std::string lift_function_table(const std::set<uint64_t>& functions, const std::
     for (uint64_t f : functions) out += fmt("  {0x%llxu, %s},\n", (unsigned long long)f, function_name(f, module).c_str());
     if (functions.empty()) out += "  {0, nullptr},\n";
     out += "};\n}  // namespace\n";
+    // not through fmt(): its buffer is small and the registration of many hooks is long
     if (module.empty())
-        out += fmt("extern \"C\" void dcp_register(unsigned long long img_base, unsigned long long img_size) {\n"
-                   "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, %zu);\n%s}\n", functions.size(), regs.c_str());
+        out += "extern \"C\" void dcp_register(unsigned long long img_base, unsigned long long img_size) {\n"
+               "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, " + std::to_string(functions.size()) + ");\n" +
+               regs + "}\n";
     else
-        out += "dcp::rt::u64 dcp_img_" + module + ";\n" +
-               fmt("extern \"C\" void dcp_register_%s(unsigned long long img_base, unsigned long long img_size) {\n"
-                   "  dcp_img_%s = img_base;\n  dcp::rt::add_module(img_base, img_size, kFunctions%s, %zu);\n%s}\n",
-                   module.c_str(), module.c_str(), sfx.c_str(), functions.size(), regs.c_str());
+        out += "dcp::rt::u64 dcp_img_" + module + ";\n" + "extern \"C\" void dcp_register_" + module +
+               "(unsigned long long img_base, unsigned long long img_size) {\n  dcp_img_" + module +
+               " = img_base;\n  dcp::rt::add_module(img_base, img_size, kFunctions" + sfx + ", " + std::to_string(functions.size()) + ");\n" + regs + "}\n";
     return out;
 }
 

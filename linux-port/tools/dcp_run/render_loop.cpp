@@ -228,7 +228,7 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
             o.input->set_blocked(ime.blocking() || chat.blocking());
             o.input->update(win);
         }
-        if (pthread_tryjoin_np(game_thread, nullptr) == 0) finish(0);  // GNU: non-blocking join
+        if (o.game_done && o.game_done->load()) finish(0);  // the game thread returned (macOS has no non-blocking pthread join)
         auto f = dcp::render::take_frame(locked ? 20 : 50);
         if (!f && !(locked && presented)) continue;
         uint64_t work0 = SDL_GetTicksNS();

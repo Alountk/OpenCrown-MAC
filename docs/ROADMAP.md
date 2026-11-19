@@ -24,14 +24,16 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] Compile time under control (functions over 20k lines built with optnone; full build ~2 min)
 
 ## Phase 4: Make it playable
-- [ ] T5f: overrides of recompiled functions (replace the byte-patch hooks)
+- [x] T5f1/T5f2: entry hooks for recompiled functions; render observers installed (21 functions), draws captured on arm64
+- [ ] T5f3: skip_offers / confirm_button / own_camera as overrides of recompiled functions
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
 - [ ] Audio, input, save data, filesystem paths on macOS
 - [ ] Menu boot, then first level
 
 ## Phase 5: Rendering
-- [ ] GL on macOS 4.1 (stopgap, to see pixels)
+- [x] dcp_run --render builds and runs on arm64 (SDL3, GL 4.1 over Metal); capture sees the draws
+- [ ] First visible frame (the screenshots are black so far)
 - [ ] Metal render backend (independent task)
 - [ ] Performance pass
 

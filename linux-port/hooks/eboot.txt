@@ -1,0 +1,23 @@
+# Image offsets of the eboot functions the host observes (src/render/capture.cpp). Pass to dcp_recompile --hooks.
+# Addresses only: no game bytes. tests/check_hooks.cmake keeps this list in step with the sources.
+7ddb0
+7eb40
+39ad80
+55fef0
+55ffb0
+5606a0
+560970
+5612d0
+564030
+5644b0
+5646d0
+564b30
+5650d0
+565280
+59f7b0
+5a0330
+5a12e0
+5a15e0
+5a3a00
+5a7260
+638870
