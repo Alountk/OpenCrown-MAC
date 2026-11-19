@@ -33,6 +33,11 @@ void set_foreign_handler(ForeignHandler handler);
 void register_hook_slot(const char* module, u64 off, EntryHook* slot);
 bool set_entry_hook(const char* module, u64 off, EntryHook fn);
 
+// Byte patches (dcp_recompile --patches). The generated code owns one flag per patched instruction, registered by module name and
+// image offset: while it is set the replacement instruction runs instead of the original. False when no such patch exists.
+void register_patch_slot(const char* module, u64 off, unsigned char* slot);
+bool set_patch(const char* module, u64 off, bool on);
+
 // A host function the guest can reach by pointer (an HLE import: the loader stores its address in the guest's GOT).
 // `thunk` adapts the guest registers to it (see dcp_abi.h) and pops the return address. Register before running guest code.
 void register_host_function(const void* host_fn, Fn thunk);

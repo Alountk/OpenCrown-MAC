@@ -30,6 +30,10 @@
 
 #include <sys/mman.h>
 
+#ifndef __x86_64__
+#include "dcp_dispatch.h"  // recompiled build: patches are switched through the dispatch runtime
+#endif
+
 namespace dcp::skip_offers {
 namespace {
 
@@ -48,6 +52,7 @@ constexpr Patch kPatches[] = {
      {0x0f, 0x84, 0x44, 0x05, 0x00, 0x00}, {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00}},  // je rel32 -> 6-byte nop
 };
 
+#ifdef __x86_64__
 // The second ask: our text replaces message 0x3cc once. ASCII + '\n' only, no '%' (it is a vsnprintf format).
 constexpr char kWarning[] =
     "Without the skip, this character can't play online\n"
@@ -61,11 +66,14 @@ constexpr uint8_t kLookupBytes[] = {0x31, 0xc0, 0x85, 0xf6, 0x78, 0x21};
 constexpr uint8_t kNoABytes[] = {0x0f, 0x84, 0x37, 0x02, 0x00, 0x00}, kNoBBytes[] = {0x0f, 0x84, 0x2e, 0x02, 0x00, 0x00};
 constexpr uint8_t kYesBytes[] = {0x4c, 0x89, 0xfb, 0xbe, 0x2d, 0x00, 0x00, 0x00};
 
+#endif
+
 bool off(const char* env) {
     const char* v = std::getenv(env);
     return v && std::strcmp(v, "0") == 0;
 }
 
+#ifdef __x86_64__
 void write_code(uint8_t* at, const uint8_t* bytes, size_t n) {  // patch sites are in the r-x text segment
     uint64_t lo = reinterpret_cast<uint64_t>(at) & ~0xfffull, hi = (reinterpret_cast<uint64_t>(at) + n + 0xfff) & ~0xfffull;
     mprotect(reinterpret_cast<void*>(lo), hi - lo, PROT_READ | PROT_WRITE | PROT_EXEC);
@@ -162,20 +170,32 @@ void install_warning(uint8_t* base) {
     std::fprintf(stderr, "skip_offers: the first \"no\" to the story skip warns and asks again\n");
 }
 
+#endif  // the second-ask warning is x86 relay code: not available in the recompiled build
+
 }  // namespace
 
 void install(uint8_t* base) {
     for (const Patch& p : kPatches) {
         if (off(p.env)) continue;  // off: game code untouched
+#ifdef __x86_64__
         uint8_t* at = base + p.site;
         if (std::memcmp(at, p.expect, p.len) != 0) {
             std::fprintf(stderr, "skip_offers: unexpected bytes at eboot+0x%x; %s not installed\n", p.site, p.what);
             continue;
         }
         write_code(at, p.repl, p.len);
+#else
+        (void)base;  // recompiled build: the patch is compiled in behind a switch (hooks/eboot_patches.txt)
+        if (!rt::set_patch("eboot", p.site, true)) {
+            std::fprintf(stderr, "skip_offers: no patch switch at eboot+0x%x (dcp_recompile --patches hooks/eboot_patches.txt); %s not installed\n", p.site, p.what);
+            continue;
+        }
+#endif
         std::fprintf(stderr, "skip_offers: %s (eboot+0x%x)\n", p.what, p.site);
     }
+#ifdef __x86_64__
     if (!off("DCP_STORY_SKIP") && !off("DCP_SKIP_WARNING")) install_warning(base);
+#endif
 }
 
 }  // namespace dcp::skip_offers

@@ -229,6 +229,28 @@ static void test_entry_hooks() {
     CHECK(lift_function(fn, fns, "", false).code.find("dcp_hook") == std::string::npos);
 }
 
+static void test_byte_patches() {
+    // A patched instruction is lifted twice, behind a runtime flag: the replacement when the flag is set, the original otherwise.
+    const uint8_t code[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};  // mov eax,1; ret
+    const std::set<uint64_t> fns{0x1000};
+    const Function fn = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    const uint8_t repl[] = {0xb8, 0x02, 0x00, 0x00, 0x00};  // mov eax,2
+    Insn alt;
+    CHECK(decode(repl, sizeof repl, 0x1000, alt));
+    const PatchMap patches{{0x1000, {alt}}};
+    const std::string p = lift_function(fn, fns, "eboot", false, {}, patches).code;
+    const size_t on = p.find("if (dcp_patch_eboot_1000) {"), els = p.find("} else {");
+    CHECK(on != std::string::npos && els != std::string::npos && on < els);
+    CHECK(p.find("0x2", on) < els && p.find("0x1", els) != std::string::npos);  // replacement first, original in the else branch
+    CHECK(lift_function(fn, fns, "eboot", false).code.find("dcp_patch") == std::string::npos);  // nothing changes without patches
+    CHECK(lift_declarations(fns, "eboot", {}, patches).find("extern uint8_t dcp_patch_eboot_1000;") != std::string::npos);
+    CHECK(lift_declarations(fns, "eboot").find("dcp_patch") == std::string::npos);
+    const std::string t = lift_function_table(fns, "eboot", {}, patches);
+    CHECK(t.find("uint8_t dcp_patch_eboot_1000 = 0;") != std::string::npos);
+    CHECK(t.find("register_patch_slot(\"eboot\", 0x1000u, &dcp_patch_eboot_1000);") != std::string::npos);
+    CHECK(lift_function_table(fns, "eboot").find("dcp_patch") == std::string::npos);
+}
+
 static void test_cfg() {
     // push rbp; mov rbp,rsp; test edi,edi; jz L; call 0x2000; pop rbp; ret; L: xor eax,eax; pop rbp; ret
     const uint8_t code[] = {0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x74, 0x07, 0xe8, 0xf3, 0x0f, 0x00, 0x00,
@@ -322,6 +344,7 @@ int main() {
     test_computed_jump_into_function();
     test_declarations();
     test_entry_hooks();
+    test_byte_patches();
     test_eh_frame();
     if (g_fail) return 1;
     std::puts("recomp: all tests passed");

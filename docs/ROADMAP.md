@@ -25,7 +25,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 
 ## Phase 4: Make it playable
 - [x] T5f1/T5f2: entry hooks for recompiled functions; render observers installed (21 functions), draws captured on arm64
-- [ ] T5f3: skip_offers / confirm_button / own_camera as overrides of recompiled functions
+- [x] T5f3: confirm_button and skip_offers (story/tutorial offers) as run-time switchable byte patches (`dcp_recompile --patches hooks/eboot_patches.txt`)
+- [ ] T5f3b: skip_offers second-ask warning and own_camera (online) in the recompiled build
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
 - [ ] Audio (CoreAudio, clean by ear), input, save data, filesystem paths on macOS

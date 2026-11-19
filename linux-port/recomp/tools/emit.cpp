@@ -1,6 +1,9 @@
 #include "emit.h"
 
+#include <cctype>
 #include <cstdlib>
+#include <cstring>
+#include <sstream>
 #include <algorithm>
 #include <cstdio>
 #include <fstream>
@@ -48,13 +51,79 @@ std::set<uint64_t> parse_hooks(const std::string& text) {
     return out;
 }
 
+static std::vector<uint8_t> parse_hex_bytes(const std::string& hex, const std::string& line) {
+    if (hex.empty() || hex.size() % 2) throw std::runtime_error("patch list: bad byte string in: " + line);
+    std::vector<uint8_t> out;
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        char* end = nullptr;
+        const std::string pair = hex.substr(i, 2);
+        const unsigned long v = std::strtoul(pair.c_str(), &end, 16);
+        if (*end || !std::isxdigit((unsigned char)pair[0]) || !std::isxdigit((unsigned char)pair[1]))
+            throw std::runtime_error("patch list: not hexadecimal in: " + line);
+        out.push_back(uint8_t(v));
+    }
+    return out;
+}
+
+std::map<uint64_t, BytePatch> parse_patches(const std::string& text) {
+    std::map<uint64_t, BytePatch> out;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        size_t nl = text.find('\n', pos);
+        if (nl == std::string::npos) nl = text.size();
+        std::string line = text.substr(pos, nl - pos);
+        pos = nl + 1;
+        line = line.substr(0, line.find('#'));
+        std::istringstream in(line);
+        std::string off, expect, repl, extra;
+        if (!(in >> off)) continue;
+        if (!(in >> expect >> repl) || (in >> extra)) throw std::runtime_error("patch list: expected three fields in: " + line);
+        char* end = nullptr;
+        const uint64_t v = std::strtoull(off.c_str(), &end, 16);
+        if (end == off.c_str() || *end) throw std::runtime_error("patch list: not a hexadecimal offset: " + line);
+        BytePatch p{parse_hex_bytes(expect, line), parse_hex_bytes(repl, line)};
+        if (p.expect.size() != p.repl.size()) throw std::runtime_error("patch list: lengths differ in: " + line);
+        out[v] = std::move(p);
+    }
+    return out;
+}
+
+// Decodes the replacement of every patch against the module, refusing a patch that does not belong to this build of the game.
+static PatchMap build_patch_map(const LoadedModule& m, const std::map<uint64_t, BytePatch>& patches) {
+    PatchMap out;
+    for (const auto& [off, p] : patches) {
+        char at[32];
+        std::snprintf(at, sizeof at, "patch at 0x%llx: ", (unsigned long long)off);
+        const std::string where = at;
+        if (off + p.expect.size() > m.image.size() || std::memcmp(m.image.data() + off, p.expect.data(), p.expect.size()) != 0)
+            throw std::runtime_error(where + "the module does not hold the expected bytes");
+        Insn orig;
+        if (!decode(m.image.data() + off, m.image.size() - off, off, orig) || orig.len != p.expect.size())
+            throw std::runtime_error(where + "the expected bytes are not exactly one instruction");
+        std::vector<Insn> alt;
+        for (size_t at_byte = 0; at_byte < p.repl.size();) {
+            Insn a;
+            if (!decode(p.repl.data() + at_byte, p.repl.size() - at_byte, off + at_byte, a))
+                throw std::runtime_error(where + "the replacement does not decode");
+            at_byte += a.len;
+            alt.push_back(std::move(a));
+        }
+        size_t total = 0;
+        for (const Insn& a : alt) total += a.len;
+        if (total != p.repl.size()) throw std::runtime_error(where + "the replacement does not end on an instruction boundary");
+        out[off] = std::move(alt);
+    }
+    return out;
+}
+
 EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
     EmitStats st;
     const std::vector<FdeRange> funcs = complete_functions(m);  // .eh_frame ranges plus entry points, PLT stubs and tail-jump targets
     std::set<uint64_t> starts;
     for (const FdeRange& r : funcs) starts.insert(r.start);
     const int shards = std::max(1, o.shards);
-    const std::string head = lift_prelude() + lift_declarations(starts, o.module, o.hooks);
+    const PatchMap patches = build_patch_map(m, o.patches);
+    const std::string head = lift_prelude() + lift_declarations(starts, o.module, o.hooks, patches);
 
     // Shards get consecutive functions (neighbours call each other), cut when a shard holds its share of the instructions.
     std::vector<std::string> bodies(size_t(shards), head);
@@ -63,7 +132,7 @@ EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
     lifted.reserve(funcs.size());
     for (const FdeRange& r : funcs) {
         Function fn = discover_function(m.image.data(), m.image.size(), 0, r.start, r.size);
-        lifted.push_back(lift_function(fn, starts, o.module, o.comments, o.hooks));
+        lifted.push_back(lift_function(fn, starts, o.module, o.comments, o.hooks, patches));
         total_insns += lifted.back().insns;
         st.insns += lifted.back().insns;
         for (const auto& [k, n] : lifted.back().unsupported) st.unsupported += n, st.unsupported_by_mnemonic[k] += n;
@@ -89,7 +158,7 @@ EmitStats emit_module(const LoadedModule& m, const EmitOptions& o) {
         std::snprintf(name, sizeof name, "%s_%03d.cpp", o.module.c_str(), i);
         if (bodies[size_t(i)].size() > head.size() || i == 0) write(name, bodies[size_t(i)]);
     }
-    write(o.module + "_table.cpp", lift_prelude() + lift_declarations(starts, o.module, o.hooks) + lift_function_table(starts, o.module, o.hooks));
+    write(o.module + "_table.cpp", lift_prelude() + lift_declarations(starts, o.module, o.hooks, patches) + lift_function_table(starts, o.module, o.hooks, patches));
     return st;
 }
 

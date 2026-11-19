@@ -133,6 +133,27 @@ static void test_emit_and_run() {
     CHECK(hooked_table.find("register_hook_slot(\"m\", 0x100u, &dcp_hook_m_100);") != std::string::npos && hooked_table.find("999") == std::string::npos);
     CHECK(read_file(dir + "/m_000.cpp").find("dcp_hook") == std::string::npos);  // no hooks requested: no hook code
 
+    // Byte patches: the instruction at 0x100 (mov eax,5) is lifted with a switchable replacement (mov eax,7).
+    o.out_dir = dir + "/p";
+    o.hooks.clear();
+    o.patches = {{0x100, {{0xb8, 0x05, 0x00, 0x00, 0x00}, {0xb8, 0x07, 0x00, 0x00, 0x00}}}};
+    mkdir(o.out_dir.c_str(), 0700);
+    emit_module(m, o);
+    const std::string patched = read_file(o.out_dir + "/m_000.cpp");
+    CHECK(patched.find("if (dcp_patch_m_100) {") != std::string::npos && patched.find("} else {") != std::string::npos);
+    CHECK(read_file(o.out_dir + "/m_table.cpp").find("register_patch_slot(\"m\", 0x100u, &dcp_patch_m_100);") != std::string::npos);
+    CHECK(read_file(dir + "/m_000.cpp").find("dcp_patch") == std::string::npos);  // no patches requested: no patch code
+    // A patch that does not match the module (another build of the game) or is not one whole instruction is refused.
+    bool refused = false;
+    o.patches = {{0x100, {{0xb8, 0x06, 0x00, 0x00, 0x00}, {0xb8, 0x07, 0x00, 0x00, 0x00}}}};
+    try { emit_module(m, o); } catch (const std::runtime_error&) { refused = true; }
+    CHECK(refused);
+    refused = false;
+    o.patches = {{0x100, {{0xb8, 0x05, 0x00}, {0x90, 0x90, 0x90}}}};  // 3 bytes of a 5-byte instruction
+    try { emit_module(m, o); } catch (const std::runtime_error&) { refused = true; }
+    CHECK(refused);
+    o.patches.clear();
+
     // The shards build and run: compile them with the dispatch runtime, register, call function 1.
     const std::string cmd = std::string(DCP_TEST_CXX) + " " + DCP_TEST_ARCH + " -std=c++20 -O1 -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
                             "/m.so " + dir + "/m_000.cpp " + dir + "/m_001.cpp " + dir + "/m_table.cpp " DCP_TEST_RT_DIR "/dcp_dispatch.cpp > " + dir + "/cc.log 2>&1";
@@ -219,6 +240,19 @@ static void test_parse_hooks() {
     CHECK(threw);
 }
 
+static void test_parse_patches() {
+    // One patch per line: image offset, the bytes expected there, the replacement bytes (hex, same length); # starts a comment.
+    const auto p = parse_patches("# layout\n2f394b be01000000 be1d000000  # confirm\n\n3aeda9 7507 6690\n");
+    CHECK(p.size() == 2 && p.at(0x2f394b).expect == std::vector<uint8_t>({0xbe, 1, 0, 0, 0}) && p.at(0x2f394b).repl[1] == 0x1d);
+    CHECK(p.at(0x3aeda9).repl == std::vector<uint8_t>({0x66, 0x90}));
+    CHECK(parse_patches("").empty());
+    for (const char* bad : {"12zz be be\n", "10 be\n", "10 be01 be\n", "10 b be\n", "10 be be 90\n", "10 be90 be\n"}) {
+        bool threw = false;
+        try { parse_patches(bad); } catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+    }
+}
+
 static void test_repo_guard() {
     // Generated sources must not end up in a git work tree (they are derived from the user's game files).
     const char* t = getenv("TMPDIR");
@@ -242,6 +276,7 @@ int main() {
     test_errors_are_readable();
     test_emit_and_run();
     test_parse_hooks();
+    test_parse_patches();
     test_repo_guard();
     test_complete_functions();
     test_tail_jump_into_a_function();
