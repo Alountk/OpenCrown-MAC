@@ -95,7 +95,11 @@ void ChatBox::local(const std::string& text) {
 
 // Runs a program with argv (no shell), detached; LD_PRELOAD (Steam's overlay) removed. Same as the launcher's.
 void ChatBox::spawn(const std::string& url) {
+    #ifdef __APPLE__
+    std::string prog = "open", arg = url;
+#else
     std::string prog = "xdg-open", arg = url;
+#endif
     char* argv[] = {prog.data(), arg.data(), nullptr};
     std::vector<char*> env;
     for (char** e = environ; *e; ++e)
@@ -104,7 +108,9 @@ void ChatBox::spawn(const std::string& url) {
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
     posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", O_RDONLY, 0);
+#ifndef __APPLE__
     posix_spawn_file_actions_addclosefrom_np(&fa, 3);
+#endif
     pid_t pid;
     if (posix_spawnp(&pid, argv[0], &fa, nullptr, argv, env.data()) == 0) children_.push_back(pid);
     else std::fprintf(stderr, "chat: cannot start xdg-open\n");

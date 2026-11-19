@@ -162,6 +162,9 @@ if(DCP_RENDER)
     URL https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz)
   FetchContent_MakeAvailable(SDL3)
   target_compile_options(SDL3-static PRIVATE -w)  # third-party
+  if(APPLE)  # SDL 3.4.18 calls getpagesize() under _XOPEN_SOURCE=700, which the current macOS SDK no longer declares
+    target_compile_options(SDL3-static PRIVATE "SHELL:-include ${CMAKE_CURRENT_SOURCE_DIR}/cmake/sdl_macos_compat.h")
+  endif()
 
   # Stage 4 renderer: shared by dcp_viewer and dcp_run --render. Two devices under one replay (src/render/device.h):
   # OpenGL 3.3 (GL entry points come from the caller's loader) and SDL_gpu on Vulkan (SPIR-V prebuilt into
@@ -229,6 +232,9 @@ target_link_libraries(dcp_lobby PRIVATE dcp_net)
 enable_testing()
 add_executable(test_formats tests/test_formats.cpp)
 target_link_libraries(test_formats PRIVATE dcp_formats)
+# hooks/eboot.txt (what dcp_recompile --hooks generates slots for) must list the functions capture.cpp hooks.
+add_test(NAME hooks_list COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR}/src/render/capture.cpp
+         -DLIST=${CMAKE_CURRENT_SOURCE_DIR}/hooks/eboot.txt -P ${CMAKE_CURRENT_SOURCE_DIR}/hooks/check_hooks.cmake)
 add_test(NAME formats COMMAND test_formats)
 add_executable(test_loader tests/test_loader.cpp)
 target_link_libraries(test_loader PRIVATE dcp_loader)

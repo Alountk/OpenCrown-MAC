@@ -192,11 +192,12 @@ const bool g_cursor_log = std::getenv("DCP_CURSOR_LOG") != nullptr;
 OBS(obs_cursor_update) {
     UNUSED_ARGS;
     if (!a0 || !*reinterpret_cast<const uint64_t*>(a0 + 0x1e0)) return;
-    typedef int64_t (*VFn)(uint64_t);  // SysV is the native ABI here
+    // The vtable holds guest code: called natively on x86, through the recompiled-code runtime on arm64.
+    auto vfn = [](uint64_t addr) { return dcp::hle::to_guest_fn<int64_t(uint64_t)>(reinterpret_cast<const void*>(addr)); };
     uint64_t vt = *reinterpret_cast<const uint64_t*>(a0);
-    int idx = int16_t(reinterpret_cast<VFn>(*reinterpret_cast<const uint64_t*>(vt + 0x1c8))(a0)) - 11;
+    int idx = int16_t(vfn(*reinterpret_cast<const uint64_t*>(vt + 0x1c8))(a0)) - 11;
     if (idx < 0 || idx > 3) return;
-    uint64_t owner = uint64_t(reinterpret_cast<VFn>(*reinterpret_cast<const uint64_t*>(vt + 0xd8))(a0));
+    uint64_t owner = uint64_t(vfn(*reinterpret_cast<const uint64_t*>(vt + 0xd8))(a0));
     uint64_t players = owner ? *reinterpret_cast<const uint64_t*>(owner + 0x80) : 0;
     if (!players) return;
     uint32_t pad = *reinterpret_cast<const uint32_t*>(players + uint64_t(idx) * 0x23b0 + 0x2284);
@@ -218,9 +219,18 @@ OBS(obs_cursor_update) {
 }
 // Optional: on a different build the site check fails, we log once and the touch screen runs open loop.
 constexpr uint32_t kCursorUpdate = 0x39ad80;
+#ifdef __x86_64__
 constexpr uint8_t kCursorUpdateBytes[] = {0x55, 0x48, 0x89, 0xe5, 0x41, 0x57};  // push rbp; mov rbp,rsp; push r15
+#endif
 
 // ---- hook installation ----
+// x86_64: the observer is a SysV function the relay calls. Recompiled build: the hooked function calls an EntryHook slot, and
+// observer<fn> reads the same six argument registers for it.
+#ifdef __x86_64__
+#define OBSERVER(fn) (void*)&fn
+#else
+#define OBSERVER(fn) reinterpret_cast<void*>(&::dcp::rt::observer<&fn>)
+#endif
 struct HookSpec {
     uint32_t addr;
     void* observer;
@@ -229,28 +239,29 @@ struct HookSpec {
 };
 // Standard prologue: push rbp (55) / mov rbp,rsp (48 89 e5) / push r1x (41 5x), or push rbx..rdi (5x) when ins[2] == 1.
 const HookSpec kHooks[] = {
-    {0x5650d0, (void*)&obs_set_vs, {1, 3, 2}, false},       // Cue_SetVsShader(cue, VS entry+0x18, 0, fetch, ...)
-    {0x565280, (void*)&obs_set_ps, {1, 3, 2}, false},       // Cue_SetPsShader(cue, PS entry+0x18, ...)
-    {0x5646d0, (void*)&obs_set_cb, {1, 3, 2}, false},       // Cue_SetConstantBuffer(cue, stage, slot, V#*)
-    {0x564030, (void*)&obs_set_tex, {1, 3, 2}, false},      // Cue_SetTexture(cue, stage, slot, T#*)
-    {0x5644b0, (void*)&obs_set_samp, {1, 3, 2}, false},     // Cue_SetSampler(cue, stage, slot, S#*)
-    {0x564b30, (void*)&obs_set_vb, {2, 2, 6}, true},        // Cue_SetVertexBuffers: mov eax,ecx; test; je
-    {0x55ffb0, (void*)&obs_set_blend, {1, 3, 2}, false},    // Dcb_SetBlendControl(dcb, rt, word)
-    {0x55fef0, (void*)&obs_init_default_state, {1, 3, 1}, false},  // Dcb_InitDefaultHardwareState(dcb): push rbx
-    {0x5606a0, (void*)&obs_set_prim, {1, 3, 2}, false},     // Dcb_SetPrimitiveType(dcb, prim)
-    {0x560970, (void*)&obs_set_index_size, {1, 3, 2}, false},
-    {0x5612d0, (void*)&obs_set_scissor, {1, 3, 2}, false},  // Dcb_SetScreenScissor(dcb, x0, y0, x1, y1)
-    {0x638870, (void*)&obs_set_rt, {1, 3, 2}, false},       // Dcb_SetRenderTarget(dcb, slot, rt*)
-    {0x5a7260, (void*)&obs_exec_sprite, {1, 3, 2}, false},
-    {0x59f7b0, (void*)&obs_exec_x1, {1, 3, 2}, false},
-    {0x5a0330, (void*)&obs_exec_x2, {1, 3, 2}, false},
-    {0x5a12e0, (void*)&obs_exec_x3, {1, 3, 2}, false},
-    {0x5a15e0, (void*)&obs_exec_x4, {1, 3, 2}, false},
-    {0x07ddb0, (void*)&obs_exec_a, {1, 3, 2}, false},
-    {0x07eb40, (void*)&obs_exec_b, {1, 3, 2}, false},
-    {0x5a3a00, (void*)&obs_layer_replay, {1, 3, 2}, false},
+    {0x5650d0, OBSERVER(obs_set_vs), {1, 3, 2}, false},       // Cue_SetVsShader(cue, VS entry+0x18, 0, fetch, ...)
+    {0x565280, OBSERVER(obs_set_ps), {1, 3, 2}, false},       // Cue_SetPsShader(cue, PS entry+0x18, ...)
+    {0x5646d0, OBSERVER(obs_set_cb), {1, 3, 2}, false},       // Cue_SetConstantBuffer(cue, stage, slot, V#*)
+    {0x564030, OBSERVER(obs_set_tex), {1, 3, 2}, false},      // Cue_SetTexture(cue, stage, slot, T#*)
+    {0x5644b0, OBSERVER(obs_set_samp), {1, 3, 2}, false},     // Cue_SetSampler(cue, stage, slot, S#*)
+    {0x564b30, OBSERVER(obs_set_vb), {2, 2, 6}, true},        // Cue_SetVertexBuffers: mov eax,ecx; test; je
+    {0x55ffb0, OBSERVER(obs_set_blend), {1, 3, 2}, false},    // Dcb_SetBlendControl(dcb, rt, word)
+    {0x55fef0, OBSERVER(obs_init_default_state), {1, 3, 1}, false},  // Dcb_InitDefaultHardwareState(dcb): push rbx
+    {0x5606a0, OBSERVER(obs_set_prim), {1, 3, 2}, false},     // Dcb_SetPrimitiveType(dcb, prim)
+    {0x560970, OBSERVER(obs_set_index_size), {1, 3, 2}, false},
+    {0x5612d0, OBSERVER(obs_set_scissor), {1, 3, 2}, false},  // Dcb_SetScreenScissor(dcb, x0, y0, x1, y1)
+    {0x638870, OBSERVER(obs_set_rt), {1, 3, 2}, false},       // Dcb_SetRenderTarget(dcb, slot, rt*)
+    {0x5a7260, OBSERVER(obs_exec_sprite), {1, 3, 2}, false},
+    {0x59f7b0, OBSERVER(obs_exec_x1), {1, 3, 2}, false},
+    {0x5a0330, OBSERVER(obs_exec_x2), {1, 3, 2}, false},
+    {0x5a12e0, OBSERVER(obs_exec_x3), {1, 3, 2}, false},
+    {0x5a15e0, OBSERVER(obs_exec_x4), {1, 3, 2}, false},
+    {0x07ddb0, OBSERVER(obs_exec_a), {1, 3, 2}, false},
+    {0x07eb40, OBSERVER(obs_exec_b), {1, 3, 2}, false},
+    {0x5a3a00, OBSERVER(obs_layer_replay), {1, 3, 2}, false},
 };
 
+#ifdef __x86_64__  // byte patching: only the x86 build detours the game's code
 bool prologue_ok(const uint8_t* p, const HookSpec& h) {
     if (h.jcc_last) return p[0] == 0x89 && p[1] == 0xc8 && p[2] == 0x85 && p[3] == 0xc0 && p[4] == 0x0f && p[5] == 0x84;
     bool head = p[0] == 0x55 && p[1] == 0x48 && p[2] == 0x89 && p[3] == 0xe5;
@@ -322,6 +333,7 @@ patch:
     mprotect(reinterpret_cast<void*>(lo), hi - lo, PROT_READ | PROT_EXEC);  // text segment; x86 needs no icache flush
     return true;
 }
+#endif  // __x86_64__
 
 // ---- draw records and frames ----
 std::mutex g_rec_mutex;
@@ -367,13 +379,18 @@ uint32_t sprite_ps_table(uint32_t perm) {
     return reinterpret_cast<const uint32_t*>(g_base + 0x79f890)[perm];
 }
 
-bool install_hooks(uint8_t* base) {
+void init_state(uint8_t* base) {
     g_base = base;
     g_states = new std::unordered_map<uint64_t, State>();
     g_prog_index = new std::unordered_map<uint64_t, int>();
     g_pending = new std::unordered_set<DrawRec*>();
     g_cur = new std::vector<std::unique_ptr<DrawRec>>();
     g_queue = new std::deque<std::unique_ptr<Frame>>();
+}
+
+#ifdef __x86_64__
+bool install_hooks(uint8_t* base) {
+    init_state(base);
     for (const HookSpec& h : kHooks)
         if (!prologue_ok(base + h.addr, h)) {
             std::fprintf(stderr, "render: unexpected prologue at eboot+0x%x; hooks not installed\n", h.addr);
@@ -389,11 +406,30 @@ bool install_hooks(uint8_t* base) {
         }
     g_enabled = true;
     std::fprintf(stderr, "render: %zu hooks installed\n", sizeof kHooks / sizeof kHooks[0]);
-    const HookSpec cursor{kCursorUpdate, (void*)&obs_cursor_update, {1, 3, 2}, false};
+    const HookSpec cursor{kCursorUpdate, OBSERVER(obs_cursor_update), {1, 3, 2}, false};
     if (std::memcmp(base + kCursorUpdate, kCursorUpdateBytes, sizeof kCursorUpdateBytes) || !install_one(cursor, e))
         std::fprintf(stderr, "render: unexpected bytes at eboot+0x%x; fairy cursor readback off\n", kCursorUpdate);
     return true;
 }
+
+#else
+// Recompiled build: the game's functions were generated with an EntryHook slot each (dcp_recompile --hooks, the offsets are
+// listed in hooks/eboot.txt); there is nothing to patch, the observers just go into the slots.
+bool install_hooks(uint8_t* base) {
+    init_state(base);
+    auto install = [](uint32_t addr, void* observer) {
+        if (rt::set_entry_hook("eboot", addr, reinterpret_cast<rt::EntryHook>(observer))) return true;
+        std::fprintf(stderr, "render: eboot+0x%x has no hook slot: regenerate the eboot with --hooks hooks/eboot.txt\n", addr);
+        return false;
+    };
+    for (const HookSpec& h : kHooks)
+        if (!install(h.addr, h.observer)) return false;
+    g_enabled = true;
+    std::fprintf(stderr, "render: %zu hooks installed\n", sizeof kHooks / sizeof kHooks[0]);
+    if (!install(kCursorUpdate, OBSERVER(obs_cursor_update))) std::fprintf(stderr, "render: fairy cursor readback off\n");
+    return true;
+}
+#endif
 
 std::atomic<uint64_t> g_draw_ticks{0}, g_draw_calls{0};
 void on_draw_impl(uint32_t* cmd, uint32_t size, uint32_t count, uint64_t index_addr, bool indexed);

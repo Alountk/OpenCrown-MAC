@@ -292,6 +292,8 @@ struct EntryParams { int32_t argc; uint32_t pad; const char* argv[4]; };
 EntryParams g_params;
 uint64_t g_entry, g_libc_start;
 
+std::atomic<bool> g_game_returned{false};
+
 void* game_thread(void*) {
     dcp::hle::install_signal_stack();
 #ifdef __x86_64__
@@ -312,6 +314,7 @@ void* game_thread(void*) {
     dcp::rt::run_guest(g_entry, reinterpret_cast<uint64_t>(&g_params), kStack, reinterpret_cast<uint64_t>(&game_exit_cb));
 #endif
     std::fprintf(stderr, "entry returned\n");
+    g_game_returned = true;
     return nullptr;
 }
 
@@ -560,6 +563,7 @@ int main(int argc, char** argv) {
 #ifdef DCP_HAVE_RENDER
         if (render) {
             RenderOptions ro;
+            ro.game_done = &g_game_returned;
             ro.window = window;
             ro.fullscreen = fullscreen;
             ro.width = width, ro.height = height;

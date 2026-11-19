@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -9,6 +10,7 @@
 class SdlInputPump;
 
 struct RenderOptions {
+    const std::atomic<bool>* game_done = nullptr;           // set by the game thread when it returns
     bool window = false;                                    // show the window (else hidden: screenshots only)
     std::vector<std::pair<uint64_t, std::string>> shots;    // (vblank, png path), ascending
     bool fullscreen = false;                                // borderless desktop fullscreen (with window)

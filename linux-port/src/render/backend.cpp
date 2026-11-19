@@ -3,7 +3,9 @@
 // one program whose uniforms stand in for the game's shader permutations. Targets are kept "top row first" so game
 // UVs sample render targets unchanged.
 #include "backend.h"
+#include "platform/compat.h"
 
+#include <sys/mman.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -83,6 +85,17 @@ uint64_t fnv(const void* p, size_t n, uint64_t h = 1469598103934665603ull) {
 // short count at the first unreadable page instead of faulting (texwatch's read-only pages still read fine).
 bool readable(uint64_t a, uint64_t n) {
     if (!a) return false;
+#ifndef __linux__
+    // No process_vm_readv: mincore() fails with ENOMEM as soon as a page of the range is not mapped.
+    const uint64_t lo = a & ~0xfffull, hi = (a + n + 0xfff) & ~0xfffull;
+    for (uint64_t x = lo; x < hi;) {
+        const uint64_t e = hi - x > (1u << 20) ? x + (1u << 20) : hi;
+        dcp_mincore_t vec[256];
+        if (mincore(reinterpret_cast<void*>(x), e - x, vec) != 0) return false;
+        x = e;
+    }
+    return true;
+#else
     constexpr uint64_t kPage = 4096;
     constexpr int kBatch = 256;
     uint8_t sink[kBatch];
@@ -98,6 +111,7 @@ bool readable(uint64_t a, uint64_t n) {
         if (r != k) return false;
     }
     return true;
+#endif
 }
 
 }  // namespace

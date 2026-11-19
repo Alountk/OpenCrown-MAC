@@ -206,6 +206,12 @@ static void test_entry_hooks() {
     CHECK(t.find("dcp::rt::EntryHook dcp_hook_libc_1000 = nullptr;") != std::string::npos);
     CHECK(t.find("register_hook_slot(\"libc\", 0x1000u, &dcp_hook_libc_1000);") != std::string::npos && t.find("dcp_hook_libc_20f0") == std::string::npos);
     CHECK(lift_declarations({0x1000}).find("EntryHook") == std::string::npos);  // nothing changes without hooks
+    // Many hooks: every slot is registered (the registration code is long) and the register function is still closed.
+    std::set<uint64_t> many;
+    for (uint64_t a = 0x1000; a < 0x1000 + 0x10 * 60; a += 0x10) many.insert(a);
+    const std::string tm = lift_function_table(many, "eboot", many);
+    CHECK(tm.find("&dcp_hook_eboot_1000);") != std::string::npos && tm.find("&dcp_hook_eboot_13b0);") != std::string::npos);
+    CHECK(tm.size() > 4 && tm.compare(tm.size() - 3, 3, ");\n}") != 0 && tm.substr(tm.size() - 2) == "}\n");
     const uint8_t code[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};  // mov eax,1; ret
     const std::set<uint64_t> fns{0x1000};
     const Function fn = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
