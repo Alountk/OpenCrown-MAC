@@ -244,8 +244,11 @@ struct Backend::Impl {
                 const char* comma = std::strchr(e, ',');
                 std::string path = comma ? comma + 1 : "texdump.png";
                 write_png(path, int(s.width), int(s.height), rgb);
-                std::fprintf(stderr, "render: texdump %llx fmt %u %ux%u T# %08x %08x %08x %08x -> %s\n",
-                             (unsigned long long)base, g.data_format(), s.width, s.height, t[0], t[1], t[2], t[3], path.c_str());
+                size_t nonzero = 0;  // zero memory means the game has not written this texture (yet)
+                for (uint64_t i = 0; i < tiled; ++i) nonzero += reinterpret_cast<const uint8_t*>(base)[i] != 0;
+                std::fprintf(stderr, "render: texdump %llx fmt %u %ux%u T# %08x %08x %08x %08x, %zu of %llu source bytes non-zero -> %s\n",
+                             (unsigned long long)base, g.data_format(), s.width, s.height, t[0], t[1], t[2], t[3], nonzero,
+                             (unsigned long long)tiled, path.c_str());
             }
         }
         return id;

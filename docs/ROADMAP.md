@@ -33,7 +33,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 
 ## Phase 5: Rendering
 - [x] dcp_run --render builds and runs on arm64 (SDL3, GL 4.1 over Metal); capture sees the draws
-- [ ] First visible frame (the screenshots are black so far)
+- [x] First visible frame on arm64 (the "Create save data?" prompt); the black frames were BC7 textures, which Apple's OpenGL rejects (CPU BC7 decoder)
+- [ ] Input: answer the prompts and reach the title and the menu
 - [ ] Metal render backend (independent task)
 - [ ] Performance pass
 

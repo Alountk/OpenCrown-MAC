@@ -1,11 +1,13 @@
 // OpenGL 3.3 Device (device.h): each draw is executed at once. Targets are kept top row first by negating clip y in
 // the VS (GL's row 0 is the bottom of the viewport), so game UVs sample render targets unchanged.
+#include <vector>
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <unordered_map>
 
+#include "formats/bc7.h"
 #include "device.h"
 #include "gl.h"
 
@@ -145,6 +147,8 @@ public:
         return tex;
     }
 
+    bool bptc_unsupported_ = false;
+
     TexId upload(TexId reuse, TexFormat f, int w, int h, const void* data, size_t n, bool linear_clamp) override {
         GLuint id = reuse;
         if (!id) glGenTextures(1, &id);
@@ -158,8 +162,24 @@ public:
         case TexFormat::BC3: fmt = GL_COMPRESSED_RGBA_S3TC_DXT5_EXT; break;
         case TexFormat::RGBA8: break;
         }
-        if (fmt) glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, GLsizei(n), data);
-        else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+        std::vector<uint8_t> decoded;
+        if (f == TexFormat::BC7 && bptc_unsupported_) fmt = 0;
+        if (fmt) {
+            while (glGetError()) {}
+            glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, GLsizei(n), data);
+            if (GLenum err = glGetError(); err && f == TexFormat::BC7) {
+                // Apple's OpenGL has no BPTC: from now on BC7 is decoded on the CPU (a Metal device would not need this)
+                std::fprintf(stderr, "render: GL has no BC7 (error %#x): decoding BC7 textures on the CPU\n", err);
+                bptc_unsupported_ = true;
+                fmt = 0;
+            }
+        }
+        if (!fmt && f == TexFormat::BC7) {
+            decoded.resize(size_t(w) * size_t(h) * 4);
+            dcp::formats::bc7_decode(static_cast<const uint8_t*>(data), w, h, decoded.data());
+            data = decoded.data();
+        }
+        if (!fmt) glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
         if (linear_clamp) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
