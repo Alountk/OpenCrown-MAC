@@ -37,6 +37,10 @@ const char* st_(int bits) {
 
 bool starts_with(const std::string& s, const char* p) { return s.rfind(p, 0) == 0; }
 
+static std::string patch_name(uint64_t site, const std::string& module) {
+    return module.empty() ? fmt("dcp_patch_%llx", (unsigned long long)site) : fmt("dcp_patch_%s_%llx", module.c_str(), (unsigned long long)site);
+}
+
 static std::string hook_name(uint64_t start, const std::string& module) {
     return module.empty() ? fmt("dcp_hook_%llx", (unsigned long long)start) : fmt("dcp_hook_%s_%llx", module.c_str(), (unsigned long long)start);
 }
@@ -47,6 +51,7 @@ struct Lifter {
     std::string module;
     bool comments = true;
     bool hooked = false;  // the function calls its EntryHook slot on entry
+    const PatchMap* patches = nullptr;  // instructions with a runtime-switchable replacement
     std::string img;  // the C++ name of this module's image base
     LiftResult res;
     std::string body;
@@ -895,6 +900,20 @@ struct Lifter {
         unsupported(in);
     }
 
+    void patched_insn(const Insn& in) {
+        if (patches) {
+            if (auto p = patches->find(in.addr); p != patches->end()) {
+                emit("if (" + patch_name(in.addr, module) + ") {");
+                for (const Insn& a : p->second) insn(a);
+                emit("} else {");
+                insn(in);
+                emit("}");
+                return;
+            }
+        }
+        insn(in);
+    }
+
     LiftResult run() {
         // Labels only for blocks that are the target of a direct jump inside this function.
         std::set<uint64_t> targets;
@@ -910,7 +929,7 @@ struct Lifter {
             for (const auto& [a, b] : fn.blocks) targets.insert(a);
         for (const auto& [a, b] : fn.blocks) {
             if (targets.count(a)) body += label(a) + ":;\n";
-            for (const Insn& in : b.insns) insn(in);
+            for (const Insn& in : b.insns) patched_insn(in);
         }
         if (fn.fell_off_end) body += "  __builtin_trap();  // control reaches the end of the function: a noreturn call\n";
 
@@ -935,8 +954,10 @@ std::string function_name(uint64_t start, const std::string& module) {
     return module.empty() ? fmt("f_%llx", (unsigned long long)start) : fmt("f_%s_%llx", module.c_str(), (unsigned long long)start);
 }
 
-std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks) {
+std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks,
+                             const PatchMap& patches) {
     std::string out;
+    for (const auto& [site, alt] : patches) out += "extern uint8_t " + patch_name(site, module) + ";\n";
     for (uint64_t h : hooks)
         if (functions.count(h)) out += "extern dcp::rt::EntryHook " + hook_name(h, module) + ";\n";
     if (!module.empty()) out += "extern dcp::rt::u64 dcp_img_" + module + ";\n";
@@ -944,13 +965,18 @@ std::string lift_declarations(const std::set<uint64_t>& functions, const std::st
     return out;
 }
 
-std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks) {
+std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks,
+                                const PatchMap& patches) {
     const std::string sfx = module.empty() ? "" : "_" + module;
     std::string slots, regs;
     for (uint64_t h : hooks) {
         if (!functions.count(h)) continue;
         slots += "dcp::rt::EntryHook " + hook_name(h, module) + " = nullptr;\n";
         regs += fmt("  dcp::rt::register_hook_slot(\"%s\", 0x%llxu, &%s);\n", module.c_str(), (unsigned long long)h, hook_name(h, module).c_str());
+    }
+    for (const auto& [site, alt] : patches) {
+        slots += "uint8_t " + patch_name(site, module) + " = 0;\n";
+        regs += fmt("  dcp::rt::register_patch_slot(\"%s\", 0x%llxu, &%s);\n", module.c_str(), (unsigned long long)site, patch_name(site, module).c_str());
     }
     std::string out = slots + "#include \"dcp_dispatch.h\"\nnamespace {\nconst dcp::rt::FnEntry kFunctions" + sfx + "[] = {\n";
     for (uint64_t f : functions) out += fmt("  {0x%llxu, %s},\n", (unsigned long long)f, function_name(f, module).c_str());
@@ -984,9 +1010,10 @@ using namespace dcp::rt;
 }
 
 LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module, bool comments,
-                         const std::set<uint64_t>& hooks) {
+                         const std::set<uint64_t>& hooks, const PatchMap& patches) {
     Lifter l(fn, functions, module, comments);
     l.hooked = hooks.count(fn.start) != 0;
+    l.patches = &patches;
     return l.run();
 }
 

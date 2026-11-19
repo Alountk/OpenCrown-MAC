@@ -10,6 +10,10 @@
 
 #include <sys/mman.h>
 
+#ifndef __x86_64__
+#include "dcp_dispatch.h"  // recompiled build: patches are switched through the dispatch runtime
+#endif
+
 namespace dcp::confirm_button {
 namespace {
 
@@ -28,24 +32,38 @@ constexpr Patch kPatches[] = {
     {0x2f394b, 5, {0xbe, 0x01, 0x00, 0x00, 0x00}, {0xbe, 0x1d, 0x00, 0x00, 0x00}},
 };
 
+#ifdef __x86_64__
 void write_code(uint8_t* at, const uint8_t* bytes, size_t n) {  // patch sites are in the r-x text segment
     uint64_t lo = reinterpret_cast<uint64_t>(at) & ~0xfffull, hi = (reinterpret_cast<uint64_t>(at) + n + 0xfff) & ~0xfffull;
     mprotect(reinterpret_cast<void*>(lo), hi - lo, PROT_READ | PROT_WRITE | PROT_EXEC);
     std::memcpy(at, bytes, n);
     mprotect(reinterpret_cast<void*>(lo), hi - lo, PROT_READ | PROT_EXEC);  // x86: no instruction cache flush needed
 }
+#endif
 
 }  // namespace
 
 void install(uint8_t* base) {
     const char* v = std::getenv("DCP_CONFIRM");
     if (!v || std::strcmp(v, "circle") != 0) return;
+#ifdef __x86_64__
     for (const Patch& p : kPatches)  // all or nothing: half the layout would be worse than none
         if (std::memcmp(base + p.site, p.expect, p.len) != 0) {
             std::fprintf(stderr, "confirm_button: unexpected bytes at eboot+0x%x; Japanese layout not installed\n", p.site);
             return;
         }
     for (const Patch& p : kPatches) write_code(base + p.site, p.repl, p.len);
+#else
+    // Recompiled build: the same patches are compiled in behind switches (hooks/eboot_patches.txt, dcp_recompile --patches).
+    (void)base;
+    bool all = true;
+    for (const Patch& p : kPatches) all = rt::set_patch("eboot", p.site, true) && all;
+    if (!all) {  // all or nothing, as above
+        for (const Patch& p : kPatches) rt::set_patch("eboot", p.site, false);
+        std::fprintf(stderr, "confirm_button: the recompiled eboot has no patch switches (dcp_recompile --patches hooks/eboot_patches.txt); Japanese layout not installed\n");
+        return;
+    }
+#endif
     std::fprintf(stderr, "confirm_button: Japanese layout (Circle confirms, Cross cancels)\n");
 }
 

@@ -124,6 +124,17 @@ static void test_large_table() {
 static int g_hook_runs = 0;
 static void hook_fn(Ctx*) { ++g_hook_runs; }
 
+static void test_patch_slots() {
+    // Generated code registers one flag per patched instruction; the host switches it by module and image offset.
+    static uint8_t flag_a = 0, flag_b = 0;
+    register_patch_slot("pt", 0x40, &flag_a);
+    register_patch_slot("pt", 0x50, &flag_b);
+    CHECK(set_patch("pt", 0x40, true) && flag_a == 1 && flag_b == 0);
+    CHECK(!set_patch("pt", 0x60, true));  // no such patch was generated
+    CHECK(!set_patch("other", 0x40, true));
+    CHECK(set_patch("pt", 0x40, false) && flag_a == 0);
+}
+
 static void test_entry_hook_slots() {
     // Generated code registers one slot per hooked function; the host installs a hook by module and offset.
     EntryHook slot_a = nullptr, slot_b = nullptr;
@@ -139,6 +150,7 @@ int main() {
     test_lookup_and_dispatch();
     test_modules();
     test_entry_hook_slots();
+    test_patch_slots();
     test_large_table();
     test_host_functions();
     if (g_fail) return std::fprintf(stderr, "dispatch: %d check(s) failed\n", g_fail), 1;

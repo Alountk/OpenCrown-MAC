@@ -142,6 +142,50 @@ static int entry_hook() {
     return 0;
 }
 
+// A byte patch switches at run time: the original code with the flag clear, the replacement with it set. Covers a data change
+// (an immediate) and a branch turned into a nop (the jump is then never taken).
+static int byte_patches() {
+    std::vector<uint8_t> img(0x2000, 0xcc);
+    // 0x1000: mov eax,1; ret      0x1010: cmp edi,0; jne +6; mov eax,10; ret; mov eax,20; ret
+    const uint8_t a[] = {0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3};
+    const uint8_t b[] = {0x83, 0xff, 0x00, 0x75, 0x06, 0xb8, 0x0a, 0x00, 0x00, 0x00, 0xc3, 0xb8, 0x14, 0x00, 0x00, 0x00, 0xc3};
+    std::memcpy(img.data() + 0x1000, a, sizeof a);
+    std::memcpy(img.data() + 0x1010, b, sizeof b);
+    PatchMap patches;
+    Insn ia, ib;
+    const uint8_t ra[] = {0xb8, 0x07, 0x00, 0x00, 0x00}, rb[] = {0x66, 0x90};  // mov eax,7 ; 2-byte nop over the jne
+    if (!decode(ra, sizeof ra, 0x1000, ia) || !decode(rb, sizeof rb, 0x1013, ib)) return std::fprintf(stderr, "e2e: patch decode\n"), 1;
+    patches[0x1000] = {ia}, patches[0x1013] = {ib};
+    const std::set<uint64_t> fns{0x1000, 0x1010};
+    std::string code = lift_prelude() + lift_declarations(fns, "", {}, patches);
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1000, sizeof a), fns, "", true, {}, patches).code;
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1010, sizeof b), fns, "", true, {}, patches).code;
+    code += lift_function_table(fns, "", {}, patches);
+    void* lib = build_and_load(code);
+    if (!lib) return 1;
+    auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register"));
+    auto f1 = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1000")), f2 = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1010"));
+    auto s1 = reinterpret_cast<unsigned char*>(dlsym(lib, "dcp_patch_1000")), s2 = reinterpret_cast<unsigned char*>(dlsym(lib, "dcp_patch_1013"));
+    if (!reg || !f1 || !f2 || !s1 || !s2) return std::fprintf(stderr, "e2e: missing symbols for the byte patches\n"), 1;
+    reg(reinterpret_cast<unsigned long long>(img.data()), img.size());
+    alignas(16) static uint8_t stack[256];
+    const uint64_t sp = reinterpret_cast<uint64_t>(stack) + sizeof stack;
+    auto run = [&](void (*fn)(Ctx*), uint64_t rdi) {
+        Ctx c{};
+        c.r[dcp::rt::RSP] = sp - 8, c.r[dcp::rt::RDI] = rdi;
+        fn(&c);
+        return uint32_t(c.r[dcp::rt::RAX]);
+    };
+    if (run(f1, 0) != 1 || run(f2, 3) != 20 || run(f2, 0) != 10) return std::fprintf(stderr, "e2e: unset patches changed the result\n"), 1;
+    *s1 = 1;
+    if (run(f1, 0) != 7 || run(f2, 3) != 20) return std::fprintf(stderr, "e2e: immediate patch\n"), 1;
+    *s2 = 1;  // the jne is gone: rdi != 0 now falls through to mov eax,10
+    if (run(f2, 3) != 10 || run(f2, 0) != 10) return std::fprintf(stderr, "e2e: branch patch\n"), 1;
+    *s1 = *s2 = 0;
+    if (run(f1, 0) != 1 || run(f2, 3) != 20) return std::fprintf(stderr, "e2e: patches did not switch off\n"), 1;
+    return 0;
+}
+
 int main() {
     std::vector<uint8_t> img(0x2000, 0xcc);
     // 0x1000: lea rcx,[rip+0xf9] (-> 0x1100); call rcx; add eax,1; ret
@@ -177,7 +221,7 @@ int main() {
     int fail = 0;
     if (uint32_t(c.r[dcp::rt::RAX]) != 8) std::fprintf(stderr, "e2e: eax = %llu, expected 8\n", (unsigned long long)c.r[dcp::rt::RAX]), ++fail;
     if (c.r[dcp::rt::RSP] != sp) std::fprintf(stderr, "e2e: rsp not restored\n"), ++fail;
-    if (fail || two_modules() || computed_jump() || entry_hook()) return 1;
+    if (fail || two_modules() || computed_jump() || entry_hook() || byte_patches()) return 1;
     std::puts("dispatch e2e: ok");
     return 0;
 }

@@ -1,0 +1,11 @@
+# Byte patches the host switches at run time (dcp_recompile eboot.bin out --patches this_file).
+# <image offset> <expected bytes> <replacement bytes>; the expected bytes make the recompile fail on another build of the game.
+
+# confirm_button: Japanese layout (DCP_CONFIRM=circle), see src/hle/confirm_button.cpp
+176c0   41c784243401000001000000   41c784243401000000000000
+177da   c7833401000001000000         c7833401000000000000
+2f394b  be01000000                 be1d000000
+
+# skip_offers: story skip (DCP_STORY_SKIP) and tutorial question (DCP_TUTORIAL_SKIP), see src/hle/skip_offers.cpp
+3aeda9  7507                       6690
+3a8adb  0f8444050000               660f1f440000

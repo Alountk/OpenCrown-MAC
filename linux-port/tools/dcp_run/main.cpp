@@ -540,11 +540,10 @@ int main(int argc, char** argv) {
         dcp::hle::install_signal_stack();
         install_fault_handler();
         install_probes(reinterpret_cast<uint64_t>(eb->img.base));
-#ifdef __x86_64__
-        // These hooks patch x86 bytes in the eboot. With recompiled code they have nothing to patch: disabled on arm64 for now
-        // (they come back as overrides of recompiled functions, see odd/tasks/arm64-static-recomp.md T5f).
         dcp::skip_offers::install(eb->img.base);  // story / tutorial skip questions for every new hero (skip_offers.h)
         dcp::confirm_button::install(eb->img.base);  // DCP_CONFIRM=circle: Japanese button layout (confirm_button.h)
+#ifdef __x86_64__
+        // own_camera still patches x86 bytes and relays; with recompiled code it is disabled (online only, not ported yet).
         dcp::own_camera::install(eb->img.base);   // separate cameras online
 #endif
 #ifndef DCP_HAVE_RENDER

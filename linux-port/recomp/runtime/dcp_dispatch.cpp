@@ -56,6 +56,20 @@ bool set_entry_hook(const char* module, u64 off, EntryHook fn) {
     return true;
 }
 
+namespace {
+std::map<std::pair<std::string, u64>, unsigned char*>& patch_slots() {
+    static std::map<std::pair<std::string, u64>, unsigned char*> m;
+    return m;
+}
+}  // namespace
+void register_patch_slot(const char* module, u64 off, unsigned char* slot) { patch_slots()[{module, off}] = slot; }
+bool set_patch(const char* module, u64 off, bool on) {
+    auto it = patch_slots().find({module, off});
+    if (it == patch_slots().end()) return false;
+    *it->second = on ? 1 : 0;
+    return true;
+}
+
 static Fn lookup(const Module& m, u64 target) {
     const u64 off = target - m.base;  // wraps for targets below the image, which the size check then rejects
     if (off >= m.size) return nullptr;
