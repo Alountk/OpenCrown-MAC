@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "net/carrier.h"
+#include "net/identity.h"
 #include "net/online_check.h"
 #include "net/rudp.h"
 #include "net/stun.h"
@@ -446,6 +447,24 @@ static void test_upnp_toggle() {
     CHECK(upnp::enabled());
     CHECK(upnp::status().state == upnp::State::Off);
 }
+static void test_user_dir() {
+    // The user data folder: the platform's own place, XDG_DATA_HOME wins when set, DCP_USER_DIR wins over both.
+    setenv("HOME", "/home/u", 1);
+    unsetenv("XDG_DATA_HOME");
+    unsetenv("DCP_USER_DIR");
+    unsetenv("DCP_SAVE_ROOT");
+#ifdef __APPLE__
+    CHECK(default_user_dir() == "/home/u/Library/Application Support/OpenCrown");
+#else
+    CHECK(default_user_dir() == "/home/u/.local/share/OpenCrown");
+#endif
+    setenv("XDG_DATA_HOME", "/data/", 1);
+    CHECK(default_user_dir() == "/data/OpenCrown");
+    setenv("DCP_USER_DIR", "/mine/", 1);
+    CHECK(identity_dir() == "/mine");
+    unsetenv("DCP_USER_DIR");
+    unsetenv("XDG_DATA_HOME");
+}
 static void live_upnp() {
     upnp::Status st = upnp::probe(47999, 120, true);
     std::printf("live UPnP: %s: %s\n", st.state == upnp::State::Mapped ? "ok" : "not mapped", st.message.c_str());
@@ -471,6 +490,7 @@ int main(int argc, char** argv) {
     setenv("DCP_STUN", "0", 1);  // the Rudp sockets below must not query real servers
     test_stun_codec();
     test_upnp_toggle();
+    test_user_dir();
     test_stun_carrier();
     test_reflexive_port();
     test_lan_candidate();
