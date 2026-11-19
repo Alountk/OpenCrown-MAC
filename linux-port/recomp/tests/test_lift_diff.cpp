@@ -921,8 +921,13 @@ int main() {
         std::ofstream f(dir + "/lifted.cpp");
         f << lifted;
     }
+#ifdef __linux__
+    const std::string atomic_lib = " -latomic";  // GCC calls libatomic for 16-byte compare-exchange even with -mcx16
+#else
+    const std::string atomic_lib;
+#endif
     if (!sh(cxx + " " + arch + " -std=c++20 -O1 -mcx16 -DDCP_TEST_FLAGS -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
-                "/lifted.so " + dir + "/lifted.cpp",
+                "/lifted.so " + dir + "/lifted.cpp" + atomic_lib,
             dir + "/cc.log")) {
         std::fprintf(stderr, "lift_diff: compiling the lifted code failed:\n");
         std::system(("head -c 4000 " + dir + "/cc.log >&2").c_str());

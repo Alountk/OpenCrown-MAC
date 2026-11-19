@@ -2,8 +2,10 @@
 // relocate, bind imports to the user's libc exports, HLE shims or logging stubs, and (without --dry) run libc's
 // module_start and the eboot entry until the first fault / exit, reporting where and why.
 #include <execinfo.h>
+#ifdef __APPLE__
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
+#endif
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>

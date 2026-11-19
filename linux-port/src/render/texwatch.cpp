@@ -23,8 +23,8 @@ std::unordered_map<uint64_t, uint64_t> g_write;  // page index -> sequence of it
 std::atomic<uint64_t> g_seq{1};
 std::atomic<uint64_t> g_last_write{0};
 bool g_veh = false;           // our SIGSEGV handler is installed
-struct sigaction g_prev_segv;
-struct sigaction g_prev_bus;   // macOS only: write faults can arrive as SIGBUS  // the handler before ours (dcp_run's crash report): faults that are not ours go there
+struct sigaction g_prev_segv;  // the handler before ours (dcp_run's crash report): faults that are not ours go there
+struct sigaction g_prev_bus;   // macOS only: write faults can arrive as SIGBUS
 
 // Records a write to page pg and lifts our protection; caller holds g_lock exclusively. False if we do not track pg.
 bool unprotect_locked(uint64_t pg) {

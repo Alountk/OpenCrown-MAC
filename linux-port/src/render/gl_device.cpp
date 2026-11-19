@@ -165,7 +165,7 @@ public:
         std::vector<uint8_t> decoded;
         if (f == TexFormat::BC7 && bptc_unsupported_) fmt = 0;
         if (fmt) {
-            while (glGetError()) {}
+            if (f == TexFormat::BC7) while (glGetError()) {}  // only BC7 is checked (see below): other formats cost nothing extra
             glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, w, h, 0, GLsizei(n), data);
             if (GLenum err = glGetError(); err && f == TexFormat::BC7) {
                 // Apple's OpenGL has no BPTC: from now on BC7 is decoded on the CPU (a Metal device would not need this)
