@@ -2,6 +2,7 @@
 
 #include <signal.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #include <ucontext.h>
 
 #include "platform/compat.h"
@@ -13,7 +14,9 @@
 namespace dcp::texwatch {
 namespace {
 
-constexpr uint64_t kPage = 0x1000;
+// The host page size: 4 KiB on x86-64, 16 KiB on Apple Silicon. mprotect works on whole host pages, so the bookkeeping must too
+// (a neighbour sharing the page only costs a spurious "written" record: the fault lifts the protection and the store goes on).
+const uint64_t kPage = uint64_t(sysconf(_SC_PAGESIZE));
 std::shared_mutex g_lock;
 std::unordered_map<uint64_t, bool> g_ro;         // page index -> currently write-protected by us
 std::unordered_map<uint64_t, uint64_t> g_write;  // page index -> sequence of its last recorded write
