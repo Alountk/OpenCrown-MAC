@@ -28,6 +28,11 @@ check "nothing is written outside the work dir" '[ ! -e "$work/gen" ]'
 out=$("$script" "$game/eboot.bin" --frames 5 2>&1)
 check "eboot.bin path accepted, arguments passed on" 'echo "$out" | tail -1 | grep -q "dcp_run $game/eboot.bin --window .*--frames 5"'
 
+# Build only (used by the online test script): everything is prepared, the game is not started.
+out=$(DCP_PLAY_BUILD_ONLY=1 "$script" "$game" 2>&1)
+check "build-only prepares dcp_run" 'echo "$out" | grep -q "^+ cmake --build .* --target dcp_run"'
+check "build-only does not launch the game" '! echo "$out" | grep -q "^+ .*run/dcp_run $game"'
+
 # Unchanged inputs and an existing build: the recompile is skipped.
 stamp=$(DCP_PLAY_PRINT_STAMP=1 "$script" "$game")
 mkdir -p "$work/gen"; touch "$work/gen/eboot_table.cpp" "$work/gen/libc_table.cpp"
