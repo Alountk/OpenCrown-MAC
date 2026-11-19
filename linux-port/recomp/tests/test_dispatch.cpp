@@ -121,9 +121,24 @@ static void test_large_table() {
     CHECK(found == table.size() && spurious == 0);
 }
 
+static int g_hook_runs = 0;
+static void hook_fn(Ctx*) { ++g_hook_runs; }
+
+static void test_entry_hook_slots() {
+    // Generated code registers one slot per hooked function; the host installs a hook by module and offset.
+    EntryHook slot_a = nullptr, slot_b = nullptr;
+    register_hook_slot("hk", 0x10, &slot_a);
+    register_hook_slot("hk", 0x20, &slot_b);
+    CHECK(set_entry_hook("hk", 0x10, hook_fn) && slot_a == hook_fn && slot_b == nullptr);
+    CHECK(!set_entry_hook("hk", 0x30, hook_fn));  // that function was not generated with a hook
+    CHECK(!set_entry_hook("other", 0x10, hook_fn));
+    CHECK(set_entry_hook("hk", 0x10, nullptr) && slot_a == nullptr);  // a hook can be removed
+}
+
 int main() {
     test_lookup_and_dispatch();
     test_modules();
+    test_entry_hook_slots();
     test_large_table();
     test_host_functions();
     if (g_fail) return std::fprintf(stderr, "dispatch: %d check(s) failed\n", g_fail), 1;

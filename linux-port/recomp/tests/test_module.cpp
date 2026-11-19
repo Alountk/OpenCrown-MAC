@@ -124,9 +124,14 @@ static void test_emit_and_run() {
 
     o.comments = true;
     o.out_dir = dir + "/c";
+    o.hooks = {0x100, 0x999};  // 0x999 is not a function of the module: ignored
     mkdir(o.out_dir.c_str(), 0700);
     emit_module(m, o);
     CHECK(read_file(o.out_dir + "/m_000.cpp").find("// 0x100: mov eax, 0x05") != std::string::npos);
+    CHECK(read_file(o.out_dir + "/m_000.cpp").find("if (dcp_hook_m_100) dcp_hook_m_100(c);") != std::string::npos);
+    const std::string hooked_table = read_file(o.out_dir + "/m_table.cpp");
+    CHECK(hooked_table.find("register_hook_slot(\"m\", 0x100u, &dcp_hook_m_100);") != std::string::npos && hooked_table.find("999") == std::string::npos);
+    CHECK(read_file(dir + "/m_000.cpp").find("dcp_hook") == std::string::npos);  // no hooks requested: no hook code
 
     // The shards build and run: compile them with the dispatch runtime, register, call function 1.
     const std::string cmd = std::string(DCP_TEST_CXX) + " " + DCP_TEST_ARCH + " -std=c++20 -O1 -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
@@ -204,6 +209,16 @@ static void test_tail_jump_into_a_function() {
     CHECK(all[1].size == 4);  // the new entry ends where the function it lies in ends
 }
 
+static void test_parse_hooks() {
+    // One hexadecimal image offset per line; # starts a comment.
+    const std::set<uint64_t> h = parse_hooks("# render observers\n5650d0\n0x39ad80  # cursor\n\n  7ddb0\n");
+    CHECK((h == std::set<uint64_t>{0x5650d0, 0x39ad80, 0x7ddb0}));
+    CHECK(parse_hooks("").empty() && parse_hooks("# nothing\n").empty());
+    bool threw = false;
+    try { parse_hooks("12zz\n"); } catch (const std::runtime_error&) { threw = true; }
+    CHECK(threw);
+}
+
 static void test_repo_guard() {
     // Generated sources must not end up in a git work tree (they are derived from the user's game files).
     const char* t = getenv("TMPDIR");
@@ -226,6 +241,7 @@ int main() {
     test_layout_and_functions();
     test_errors_are_readable();
     test_emit_and_run();
+    test_parse_hooks();
     test_repo_guard();
     test_complete_functions();
     test_tail_jump_into_a_function();

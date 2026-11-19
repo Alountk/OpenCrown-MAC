@@ -43,6 +43,9 @@ struct Ctx {
     Vec x[16];   // ymm0..15
     Fpu fpu;
 };
+// A host function that runs when a hooked recompiled function is entered, with the registers of the call (rdi, rsi, ... and the
+// return address at [rsp]); the function body runs afterwards.
+using EntryHook = void (*)(Ctx*);
 static_assert(__builtin_offsetof(Ctx, x) == 160, "the differential test's assembly trampoline hard-codes this layout");
 
 // The guest context of the guest code that is currently calling into the host on this thread (set while an HLE thunk runs),

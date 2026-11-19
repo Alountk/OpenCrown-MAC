@@ -37,11 +37,16 @@ const char* st_(int bits) {
 
 bool starts_with(const std::string& s, const char* p) { return s.rfind(p, 0) == 0; }
 
+static std::string hook_name(uint64_t start, const std::string& module) {
+    return module.empty() ? fmt("dcp_hook_%llx", (unsigned long long)start) : fmt("dcp_hook_%s_%llx", module.c_str(), (unsigned long long)start);
+}
+
 struct Lifter {
     const Function& fn;
     const std::set<uint64_t>& functions;
     std::string module;
     bool comments = true;
+    bool hooked = false;  // the function calls its EntryHook slot on entry
     std::string img;  // the C++ name of this module's image base
     LiftResult res;
     std::string body;
@@ -914,6 +919,10 @@ struct Lifter {
         constexpr size_t kHugeLines = 20000;
         const bool huge = size_t(std::count(body.begin(), body.end(), '\n')) > kHugeLines;
         res.code = fmt("extern \"C\" %svoid %s(Ctx* c) {\n", huge ? "__attribute__((optnone)) " : "", fname(fn.start).c_str());
+        if (hooked) {
+            const std::string h = hook_name(fn.start, module);
+            res.code += fmt("  if (%s) %s(c);\n", h.c_str(), h.c_str());
+        }
         res.code += "  u64 r[16];\n  Vec x[16];\n  Flags fl;\n  DCP_LOAD();\n";
         res.code += body + "}\n";
         return std::move(res);
@@ -926,27 +935,35 @@ std::string function_name(uint64_t start, const std::string& module) {
     return module.empty() ? fmt("f_%llx", (unsigned long long)start) : fmt("f_%s_%llx", module.c_str(), (unsigned long long)start);
 }
 
-std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module) {
+std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks) {
     std::string out;
+    for (uint64_t h : hooks)
+        if (functions.count(h)) out += "extern dcp::rt::EntryHook " + hook_name(h, module) + ";\n";
     if (!module.empty()) out += "extern dcp::rt::u64 dcp_img_" + module + ";\n";
     for (uint64_t f : functions) out += "extern \"C\" void " + function_name(f, module) + "(Ctx*);\n";
     return out;
 }
 
-std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module) {
+std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks) {
     const std::string sfx = module.empty() ? "" : "_" + module;
-    std::string out = "#include \"dcp_dispatch.h\"\nnamespace {\nconst dcp::rt::FnEntry kFunctions" + sfx + "[] = {\n";
+    std::string slots, regs;
+    for (uint64_t h : hooks) {
+        if (!functions.count(h)) continue;
+        slots += "dcp::rt::EntryHook " + hook_name(h, module) + " = nullptr;\n";
+        regs += fmt("  dcp::rt::register_hook_slot(\"%s\", 0x%llxu, &%s);\n", module.c_str(), (unsigned long long)h, hook_name(h, module).c_str());
+    }
+    std::string out = slots + "#include \"dcp_dispatch.h\"\nnamespace {\nconst dcp::rt::FnEntry kFunctions" + sfx + "[] = {\n";
     for (uint64_t f : functions) out += fmt("  {0x%llxu, %s},\n", (unsigned long long)f, function_name(f, module).c_str());
     if (functions.empty()) out += "  {0, nullptr},\n";
     out += "};\n}  // namespace\n";
     if (module.empty())
         out += fmt("extern \"C\" void dcp_register(unsigned long long img_base, unsigned long long img_size) {\n"
-                   "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, %zu);\n}\n", functions.size());
+                   "  dcp::rt::set_image(img_base, img_size);\n  dcp::rt::set_function_table(kFunctions, %zu);\n%s}\n", functions.size(), regs.c_str());
     else
         out += "dcp::rt::u64 dcp_img_" + module + ";\n" +
                fmt("extern \"C\" void dcp_register_%s(unsigned long long img_base, unsigned long long img_size) {\n"
-                   "  dcp_img_%s = img_base;\n  dcp::rt::add_module(img_base, img_size, kFunctions%s, %zu);\n}\n",
-                   module.c_str(), module.c_str(), sfx.c_str(), functions.size());
+                   "  dcp_img_%s = img_base;\n  dcp::rt::add_module(img_base, img_size, kFunctions%s, %zu);\n%s}\n",
+                   module.c_str(), module.c_str(), sfx.c_str(), functions.size(), regs.c_str());
     return out;
 }
 
@@ -965,8 +982,10 @@ using namespace dcp::rt;
 )";
 }
 
-LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module, bool comments) {
+LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module, bool comments,
+                         const std::set<uint64_t>& hooks) {
     Lifter l(fn, functions, module, comments);
+    l.hooked = hooks.count(fn.start) != 0;
     return l.run();
 }
 
