@@ -175,6 +175,20 @@ endif()
 
 # dcp_run: --render (GL window / screenshots) with DCP_RENDER, headless layer-3 behaviour otherwise.
 add_executable(dcp_run tools/dcp_run/main.cpp)
+
+# Recompiled game code (arm64): the C++ that dcp_recompile wrote from the user's own eboot and PRX files. Pass the directory with
+# -DDCP_RECOMPILED_DIR=<dir>; it holds eboot_*.cpp, libc_*.cpp and the *_table.cpp files. Linked as objects so the strong
+# dcp_register_<module> definitions replace the weak ones in dcp_run.
+if(DCP_RECOMPILED AND DCP_RECOMPILED_DIR)
+  file(GLOB DCP_GEN_SOURCES CONFIGURE_DEPENDS "${DCP_RECOMPILED_DIR}/*.cpp")
+  if(NOT DCP_GEN_SOURCES)
+    message(FATAL_ERROR "DCP_RECOMPILED_DIR=${DCP_RECOMPILED_DIR} has no .cpp files: run dcp_recompile first")
+  endif()
+  add_library(dcp_game OBJECT ${DCP_GEN_SOURCES})
+  target_include_directories(dcp_game PRIVATE recomp/runtime)
+  target_compile_options(dcp_game PRIVATE -O1 -w)  # generated code: no warnings, a build time that stays in minutes
+  target_sources(dcp_run PRIVATE $<TARGET_OBJECTS:dcp_game>)
+endif()
 target_link_libraries(dcp_run PRIVATE dcp_loader dcp_hle ${CMAKE_DL_LIBS})
 if(DCP_RENDER)
   target_sources(dcp_run PRIVATE tools/dcp_run/render_loop.cpp tools/dcp_run/sdl_audio.cpp tools/dcp_run/sdl_input.cpp)

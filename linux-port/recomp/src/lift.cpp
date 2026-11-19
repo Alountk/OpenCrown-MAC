@@ -1,5 +1,6 @@
 #include "lift.h"
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -504,7 +505,12 @@ struct Lifter {
                                     "punpckh", "pxor", "por", "pand", "pandn", "pmull", "pack"};
         static const char* same[] = {"movaps", "movups", "movapd", "movupd", "movdqa", "movdqu", "ucomiss", "ucomisd", "comiss",
                                      "comisd", "movntdq", "movntps", "movntpd", "movntdqa", "movd", "movq", "cvttss2si", "cvttsd2si", "cvtss2si", "cvtsd2si", "pshufd", "pshuflw",
-                                     "pshufhw", "movddup", "movshdup", "movsldup"};
+                                     "pshufhw", "movddup", "movshdup", "movsldup", "pcmpistri"};
+        if (mn == "pcmpistrm" && in.nops == 3) {  // writes xmm0; bits 255:128 are preserved
+            emit(fmt("{ const Vec t = pcmpistrm(x[%d], %s, %d, fl); x[0].q[0] = t.q[0]; x[0].q[1] = t.q[1]; }", d.vec,
+                     vread(in.ops[1]).c_str(), int(in.ops[2].imm)));
+            return;
+        }
         bool shift = false, known = false;
         for (const char* k : same) known |= mn == k;
         for (const char* k : dup) {
@@ -580,6 +586,11 @@ struct Lifter {
             return emit(write(d, fmt("vlo<%s>(x[%d])", T, s.vec)));
         }
 
+        if ((mn == "vpcmpistri" || mn == "vpcmpistrm") && in.nops == 3) {
+            const std::string args = fmt("x[%d], %s, %d, fl", d.vec, vread(s).c_str(), int(in.ops[2].imm));
+            if (mn == "vpcmpistri") return emit(fmt("r[RCX] = pcmpistri(%s);", args.c_str())), void();
+            return emit(fmt("x[0] = vcut<128>(pcmpistrm(%s));", args.c_str())), void();
+        }
         if (mn == "vptest" && in.nops == 2) return emit(fmt("vptest<%d>(x[%d], %s, fl);", d.bits, d.vec, vread(s).c_str())), void();
         if (mn == "vcvtdq2pd" && in.nops == 2) return vset(d, fmt("vpcvtdq2pd<%d>(%s)", d.bits, vread(s).c_str()));
         if ((mn == "vmaskmovps" || mn == "vmaskmovpd") && in.nops == 3) {
@@ -699,6 +710,17 @@ struct Lifter {
         emit("}");
     }
 
+    // An indirect jump that could not be resolved, in a function that has other blocks: the target may be one of them (a computed
+    // goto, memcpy's size dispatch) or another function (a tail call through a pointer). Dispatch on the target address.
+    void computed_jump(const Insn& in) {
+        const std::string target = read(in.ops[0], 64);
+        emit(fmt("{ u64 t_ = %s; switch (t_ - %s) {", target.c_str(), img.c_str()));
+        for (const auto& [a, b] : fn.blocks)
+            if (a != fn.start) emit(fmt("case 0x%llx: goto %s;", (unsigned long long)a, label(a).c_str()));
+        emit("default: { DCP_SAVE(); jmp_ind(c, t_); return; }");
+        emit("} }");
+    }
+
     // ---- one instruction ---------------------------------------------------------------------------------------
 
     void insn(const Insn& in) {
@@ -715,6 +737,7 @@ struct Lifter {
         if (in.flow == Flow::Call) return call_to(in);
         if (in.flow == Flow::Jump) {
             if (!in.direct && fn.jump_tables.count(in.addr)) return jump_table(in);
+            if (!in.direct && fn.has_indirect_jump && fn.blocks.size() > 1) return computed_jump(in);
             if (in.direct && fn.blocks.count(in.target)) return emit("goto " + label(in.target) + ";");
             return tail_to(in);
         }
@@ -878,13 +901,19 @@ struct Lifter {
         for (const auto& [ja, jt] : fn.jump_tables)
             for (uint64_t t : jt.targets)
                 if (fn.blocks.count(t)) targets.insert(t);
+        if (fn.has_indirect_jump)  // a computed jump may land on any block
+            for (const auto& [a, b] : fn.blocks) targets.insert(a);
         for (const auto& [a, b] : fn.blocks) {
             if (targets.count(a)) body += label(a) + ":;\n";
             for (const Insn& in : b.insns) insn(in);
         }
         if (fn.fell_off_end) body += "  __builtin_trap();  // control reaches the end of the function: a noreturn call\n";
 
-        res.code = fmt("extern \"C\" void %s(Ctx* c) {\n", fname(fn.start).c_str());
+        // The optimizer is super-linear in function size: past this many lines compiling would take hours, so such a function
+        // is built unoptimized (it is cold initialisation code in practice).
+        constexpr size_t kHugeLines = 20000;
+        const bool huge = size_t(std::count(body.begin(), body.end(), '\n')) > kHugeLines;
+        res.code = fmt("extern \"C\" %svoid %s(Ctx* c) {\n", huge ? "__attribute__((optnone)) " : "", fname(fn.start).c_str());
         res.code += "  u64 r[16];\n  Vec x[16];\n  Flags fl;\n  DCP_LOAD();\n";
         res.code += body + "}\n";
         return std::move(res);

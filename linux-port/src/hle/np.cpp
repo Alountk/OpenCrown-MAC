@@ -377,13 +377,13 @@ void register_np() {
     REG("libSceRtc", sceRtcGetWin32FileTime);
     REG("libSceSsl", sceSslInit); REG("libSceSsl", sceSslTerm); REG("libSceHttp", sceHttpInit); REG("libSceHttp", sceHttpTerm);
     const char* k = "libSceNpToolkit2";
-    loader::register_hle_nid(k, "7zsee5IHLis", reinterpret_cast<void*>(&tk2_get_presence));
-    loader::register_hle_nid(k, "mIinAn8TvdY", reinterpret_cast<void*>(&tk2_is_busy));
-    loader::register_hle_nid(k, "4mdynkqoCFc", reinterpret_cast<void*>(&tk2_presence_result));
-    loader::register_hle_nid(k, "xCg+igDBo3Q", reinterpret_cast<void*>(&tk2_set_presence));
-    loader::register_hle_nid(k, "0fPn7oELg8E", reinterpret_cast<void*>(&tk2_clear_presence));
-    for (const char* nid : kTk2Results) loader::register_hle_nid("libSceNpToolkit2", nid, reinterpret_cast<void*>(&tk2_result));
-    for (const char* nid : kTk2Other) loader::register_hle_nid("libSceNpToolkit2", nid, reinterpret_cast<void*>(&tk2_ok));
+    REG_NID(k, "7zsee5IHLis", tk2_get_presence);
+    REG_NID(k, "mIinAn8TvdY", tk2_is_busy);
+    REG_NID(k, "4mdynkqoCFc", tk2_presence_result);
+    REG_NID(k, "xCg+igDBo3Q", tk2_set_presence);
+    REG_NID(k, "0fPn7oELg8E", tk2_clear_presence);
+    for (const char* nid : kTk2Results) REG_NID("libSceNpToolkit2", nid, tk2_result);
+    for (const char* nid : kTk2Other) REG_NID("libSceNpToolkit2", nid, tk2_ok);
     register_matching2();
 }
 

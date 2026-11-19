@@ -72,11 +72,16 @@ template <class R, class... A> inline void* guest_fn_ptr(GuestFn<R(A...)> f) { r
 
 #ifdef __x86_64__
 #define REG(lib, fn) ::dcp::loader::register_hle(lib, #fn, reinterpret_cast<void*>(&fn))
+#define REG_NID(lib, nid, fn) ::dcp::loader::register_hle_nid(lib, nid, reinterpret_cast<void*>(&fn))
 #else
 // Recompiled build: the guest reaches the function through its GOT slot and the dispatcher; the thunk adapts the guest's
 // SysV registers to the host function (recomp/runtime/dcp_abi.h).
 #define REG(lib, fn)                                                                        \
     (::dcp::loader::register_hle(lib, #fn, reinterpret_cast<void*>(&fn)),                   \
+     ::dcp::rt::register_host_function(reinterpret_cast<void*>(&fn), ::dcp::rt::thunk<&fn>))
+// Same, for a function that several imports share and that is registered by NID.
+#define REG_NID(lib, nid, fn)                                                               \
+    (::dcp::loader::register_hle_nid(lib, nid, reinterpret_cast<void*>(&fn)),               \
      ::dcp::rt::register_host_function(reinterpret_cast<void*>(&fn), ::dcp::rt::thunk<&fn>))
 #endif
 
