@@ -146,6 +146,7 @@ DCP_SYSV int32_t sceKernelClose(int32_t fd) {
 DCP_SYSV int64_t sceKernelRead(int32_t fd, void* buf, uint64_t n) {
     File* f = get(fd);
     if (!f) return kErr(kEBADF);
+    DCP_HLE_LOG("sceKernelRead", "fd %d '%s' n %llu", fd, f->path.c_str(), (unsigned long long)n);
     uint64_t done = 0;
     while (done < n) {
         size_t chunk = size_t(n - done > 0x40000000 ? 0x40000000 : n - done);

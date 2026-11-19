@@ -11,6 +11,7 @@
 #include "formats/acb.h"
 #include "formats/bsb.h"
 #include "formats/afs2.h"
+#include "formats/bc7.h"
 #include "formats/crilayla.h"
 #include "formats/dds.h"
 #include "formats/ftx.h"
@@ -790,10 +791,63 @@ void test_cpk_state() {
     std::filesystem::remove(path);
 }
 
+// BC7 blocks of every mode against a reference decoder's output (vectors from random data, see bc7_vectors.inc).
+void test_bc7() {
+    struct Vec { uint8_t block[16]; uint8_t rgba[64]; };
+    static const Vec kVectors[] = {
+#include "bc7_vectors.inc"
+    };
+    int bad = 0;
+    for (const Vec& v : kVectors) {
+        uint8_t out[64];
+        bc7_decode_block(v.block, out);
+        if (std::memcmp(out, v.rgba, 64) != 0) {
+            ++bad;
+            std::fprintf(stderr, "bc7: mode %d block differs\n", __builtin_ctz(v.block[0]));
+        }
+    }
+    CHECK(bad == 0);
+    // Every partition of every mode: 64 pseudo-random blocks per mode, hashed, against the hashes of the reference decoder (this
+    // is what exercises the partition and anchor tables, which a handful of vectors cannot).
+    static const uint64_t kExpected[8] = {0xf75d8b7131e8dac6ull, 0x439c061ea42b01eaull, 0x5b0d6301ca1973aaull, 0x1618e663ead52b6full,
+                                          0x9079dfb35b7a287dull, 0x0cf115d0bb5c68a2ull, 0x20af63bc2bd17ea5ull, 0xf574699b7986a31eull};
+    static const int kPartitionBits[8] = {4, 6, 6, 6, 0, 0, 0, 6};
+    for (int mode = 0; mode < 8; ++mode) {
+        uint64_t s = 0x9e3779b97f4a7c15ull ^ uint64_t(mode), h = 1469598103934665603ull;
+        for (int p = 0; p < 64; ++p) {
+            uint8_t blk[16], px[64];
+            for (int i = 0; i < 16; ++i) s ^= s << 13, s ^= s >> 7, s ^= s << 17, blk[i] = uint8_t(s);
+            for (int i = 0; i <= mode; ++i) blk[i / 8] = uint8_t(i == mode ? blk[i / 8] | 1u << (i % 8) : blk[i / 8] & ~(1u << (i % 8)));
+            for (int i = 0; i < kPartitionBits[mode]; ++i) {
+                const int bit = mode + 1 + i;
+                blk[bit / 8] = uint8_t((blk[bit / 8] & ~(1u << (bit % 8))) | ((p >> i & 1) << (bit % 8)));
+            }
+            bc7_decode_block(blk, px);
+            for (uint8_t c : px) h = (h ^ c) * 1099511628211ull;
+        }
+        if (h != kExpected[mode]) std::fprintf(stderr, "bc7: mode %d partition sweep differs (%016llx)\n", mode, (unsigned long long)h);
+        CHECK(h == kExpected[mode]);
+    }
+    // A whole image: 8x8 pixels are four blocks laid out row by row; the same block everywhere gives the same pixels.
+    uint8_t img[4 * 16], out[8 * 8 * 4];
+    for (int i = 0; i < 4; ++i) std::memcpy(img + 16 * i, kVectors[0].block, 16);
+    bc7_decode(img, 8, 8, out);
+    for (int by = 0; by < 2; ++by)
+        for (int bx = 0; bx < 2; ++bx)
+            for (int y = 0; y < 4; ++y) CHECK(std::memcmp(out + ((by * 4 + y) * 8 + bx * 4) * 4, kVectors[0].rgba + y * 16, 16) == 0);
+    // A reserved mode (first byte zero) decodes to transparent black.
+    uint8_t zero[16] = {}, z[64];
+    bc7_decode_block(zero, z);
+    bool all0 = true;
+    for (uint8_t c : z) all0 &= c == 0;
+    CHECK(all0);
+}
+
 }  // namespace
 
 int main() {
     auto t = make_table();
+    test_bc7();
     test_utf(t);
     // Same table under CRI's XOR obfuscation.
     uint8_t m = 0x5F;

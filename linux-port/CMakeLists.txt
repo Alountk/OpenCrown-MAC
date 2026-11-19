@@ -59,6 +59,7 @@ add_library(dcp_formats STATIC
   src/formats/gnm_detile.cpp
   src/formats/ftx.cpp
   src/formats/dds.cpp
+  src/formats/bc7.cpp
   src/formats/mbs.cpp
   src/formats/mcb.cpp
   src/formats/bsb.cpp)
