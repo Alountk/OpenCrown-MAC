@@ -99,7 +99,10 @@ bool install_sdl_audio() {
     // native PipeWire backend crackled on the Deck OLED and a Steam Machine (bug reports 11, 12, 2026-10-19): it fills
     // each quantum in PipeWire's real-time thread from the stream our normal-priority mixer thread feeds, and a late
     // fill is played as a gap. A normal-priority hint, so SDL_AUDIO_DRIVER in the environment still wins.
+#ifndef __APPLE__
+    // Linux backends only; on macOS SDL picks CoreAudio by itself.
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "pulseaudio,pipewire,alsa");
+#endif
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
         std::fprintf(stderr, "audio: SDL_InitSubSystem: %s (falling back to silent paced output)\n", SDL_GetError());
         return false;
