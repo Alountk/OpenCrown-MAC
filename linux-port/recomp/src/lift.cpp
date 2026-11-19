@@ -137,12 +137,15 @@ struct Lifter {
 
     void call_to(const Insn& in) {
         const uint64_t next = in.addr + in.len;
+        const bool indirect = !in.direct;
+        if (indirect) emit(fmt("{ u64 t_ = %s;", read(in.ops[0], 64).c_str()));  // the operand is read before the push: call [rsp+8]
         emit(fmt("r[RSP] -= 8; st<u64>(r[RSP], %s + 0x%llxull);", img.c_str(), (unsigned long long)next));
         emit("DCP_SAVE();");
         if (in.direct && functions.count(in.target)) emit(fname(in.target) + "(c);");
         else if (in.direct) emit(fmt("call_ind(c, %s + 0x%llxull);", img.c_str(), (unsigned long long)in.target));
-        else emit(fmt("call_ind(c, %s);", read(in.ops[0], 64).c_str()));
+        else emit("call_ind(c, t_);");
         emit("DCP_LOAD();");
+        if (indirect) emit("}");
     }
 
     void tail_to(const Insn& in) {

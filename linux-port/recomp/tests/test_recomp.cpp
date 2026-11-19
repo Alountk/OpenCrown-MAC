@@ -251,6 +251,16 @@ static void test_byte_patches() {
     CHECK(lift_function_table(fns, "eboot").find("dcp_patch") == std::string::npos);
 }
 
+static void test_indirect_call_operand_order() {
+    // call [rsp+8]: x86 reads the target before it pushes the return address, so the stack operand sees the old rsp.
+    const uint8_t code[] = {0xff, 0x54, 0x24, 0x08, 0xc3};
+    const std::set<uint64_t> fns{0x1000};
+    const Function fn = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    const std::string c = lift_function(fn, fns, "eboot", false).code;
+    const size_t read = c.find("ld<u64>"), push = c.find("r[RSP] -= 8");
+    CHECK(read != std::string::npos && push != std::string::npos && read < push);
+}
+
 static void test_cfg() {
     // push rbp; mov rbp,rsp; test edi,edi; jz L; call 0x2000; pop rbp; ret; L: xor eax,eax; pop rbp; ret
     const uint8_t code[] = {0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x74, 0x07, 0xe8, 0xf3, 0x0f, 0x00, 0x00,
@@ -345,6 +355,7 @@ int main() {
     test_declarations();
     test_entry_hooks();
     test_byte_patches();
+    test_indirect_call_operand_order();
     test_eh_frame();
     if (g_fail) return 1;
     std::puts("recomp: all tests passed");
