@@ -38,10 +38,12 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] First visible frame on arm64 (the "Create save data?" prompt); the black frames were BC7 textures, which Apple's OpenGL rejects (CPU BC7 decoder)
 - [ ] Input: answer the prompts and reach the title and the menu
 - [ ] Metal render backend (independent task)
-- [ ] Performance pass
+- [x] Performance measured (M2 Pro, 90 s of play): 60 fps with ample headroom; main game thread spent 60% of its time in a yield busy-wait, now throttled (CPU 142 s -> 80 s per 91 s of play, same pacing)
+- [ ] Performance: remaining hot spots if lower-end Macs need them (guest code on the main thread ~25% of a core, render thread ~33%)
 
 ## Phase 6: Delivery
 - [x] T6d: one-command pipeline for the user's own dump: `linux-port/play-mac.sh <dump folder>` (from scratch 235 s, then 8 s)
+- [ ] Launcher (tools/launcher, ImGui: dump folder, controls, display options, online) on macOS: it still uses xdg-open, /proc/self/exe and the AppImage updater
 - [ ] Packaging and docs
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)
