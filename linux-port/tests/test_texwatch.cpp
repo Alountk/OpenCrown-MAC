@@ -11,7 +11,27 @@
 
 #include "render/texwatch.h"
 
+// A texture does not start on a host page boundary (Apple Silicon pages are 16 KiB, the game's are 4 KiB): protecting and
+// writing inside it must still work, and the write must be recorded.
+static int unaligned() {
+    void* mem = mmap(nullptr, 0x20000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mem == MAP_FAILED) return std::perror("mmap"), 1;
+    for (uint64_t off : {0x1000ull, 0x2800ull, 0x5000ull}) {
+        auto* p = static_cast<volatile uint8_t*>(mem) + off;
+        const uint64_t base = reinterpret_cast<uint64_t>(p);
+        uint64_t seq = 0;
+        if (!dcp::texwatch::protect(base, 0x1800, &seq)) return std::fprintf(stderr, "unaligned: protect at +%#llx failed\n", (unsigned long long)off), 1;
+        if (dcp::texwatch::written_since(base, 0x1800, seq)) return std::fprintf(stderr, "unaligned: written before any write\n"), 1;
+        p[0x1000] = 0x5a;  // faults on the read-only page; the handler lifts the protection and the store is retried
+        if (p[0x1000] != 0x5a) return std::fprintf(stderr, "unaligned: the store was lost\n"), 1;
+        if (!dcp::texwatch::written_since(base, 0x1800, seq)) return std::fprintf(stderr, "unaligned: the write was not recorded\n"), 1;
+    }
+    std::puts("texwatch: unaligned ranges ok");
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (unaligned()) return 1;
     const int kThreads = argc > 1 ? std::atoi(argv[1]) : 8;  // 1 = no concurrent faults (control)
     constexpr int kRounds = 20000;
     void* mem = mmap(nullptr, 0x10000, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

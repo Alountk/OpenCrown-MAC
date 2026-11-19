@@ -2,6 +2,8 @@
 // relocate, bind imports to the user's libc exports, HLE shims or logging stubs, and (without --dry) run libc's
 // module_start and the eboot entry until the first fault / exit, reporting where and why.
 #include <execinfo.h>
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -263,7 +265,22 @@ void install_probes(uint64_t) {}
 void on_fault(int sig, siginfo_t* si, void*) {
     std::fprintf(stderr, "fault: signal %d at ", sig);
     print_addr("address", reinterpret_cast<uint64_t>(si->si_addr));
-    std::fprintf(stderr, "\n");
+    std::fprintf(stderr, " (si_code %d)\n", si->si_code);
+    {  // what the page is: unmapped, or its protection (a write to a read-only page, a stale pointer...)
+        mach_vm_address_t a = reinterpret_cast<mach_vm_address_t>(si->si_addr);
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info;
+        mach_msg_type_number_t n = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t obj;
+        const mach_vm_address_t want = a;
+        if (mach_vm_region(mach_task_self(), &a, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &n, &obj) != KERN_SUCCESS || a > want)
+            std::fprintf(stderr, "fault: the address is not mapped\n");
+        else
+            std::fprintf(stderr, "fault: page is %s%s%s (maximum %s%s%s) in the region 0x%llx+0x%llx\n", info.protection & VM_PROT_READ ? "r" : "-",
+                         info.protection & VM_PROT_WRITE ? "w" : "-", info.protection & VM_PROT_EXECUTE ? "x" : "-",
+                         info.max_protection & VM_PROT_READ ? "r" : "-", info.max_protection & VM_PROT_WRITE ? "w" : "-",
+                         info.max_protection & VM_PROT_EXECUTE ? "x" : "-", (unsigned long long)a, (unsigned long long)size);
+    }
     void* frames[24];  // the recompiled functions are named f_<hex>, so the host backtrace shows the guest call chain
     backtrace_symbols_fd(frames, backtrace(frames, 24), 2);
     finish(128 + sig);
