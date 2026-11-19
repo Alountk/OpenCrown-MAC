@@ -106,7 +106,11 @@ std::string default_user_dir() {
         const passwd* pw = getpwuid(getuid());
         home = pw && pw->pw_dir ? pw->pw_dir : ".";
     }
+#ifdef __APPLE__
+    return strip_slashes(home) + "/Library/Application Support/OpenCrown";
+#else
     return strip_slashes(home) + "/.local/share/OpenCrown";
+#endif
 }
 
 Identity load_identity(const std::string& dir) {

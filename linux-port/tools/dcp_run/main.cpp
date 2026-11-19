@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
                              "  --4k: PS4 Pro mode, the game renders at 3840x2160\n"
                              "  --vsync, --fsr, --sharpen S, --scale S|window: display options (launcher Settings)\n"
                              "  --shot writes the frame at vblank --frames N and exits; --shots several (vblank=path)\n"
-                             "  user dir (input.ini, saves/): ${XDG_DATA_HOME:-~/.local/share}/OpenCrown (DCP_USER_DIR\n"
+                             "  user dir (input.ini, saves/): ${XDG_DATA_HOME:-~/.local/share}/OpenCrown, macOS ~/Library/Application Support/OpenCrown (DCP_USER_DIR\n"
                              "  overrides; DCP_SAVE_ROOT overrides the saves folder alone)\n");
         return 2;
     }

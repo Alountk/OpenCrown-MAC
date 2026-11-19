@@ -18,7 +18,7 @@ struct Config {
     bool neo = false;          // report a PS4 Pro (sceKernelIsNeoMode): the game renders 3840x2160 targets
 };
 
-// Default save root: ${XDG_DATA_HOME:-~/.local/share}/OpenCrown/saves, or $DCP_SAVE_ROOT when set.
+// Default save root: ${XDG_DATA_HOME:-~/.local/share}/OpenCrown/saves (macOS: ~/Library/Application Support/OpenCrown/saves), or $DCP_SAVE_ROOT when set.
 std::string default_save_root();
 
 void register_all(const Config& cfg);

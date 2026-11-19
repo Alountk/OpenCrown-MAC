@@ -54,4 +54,4 @@ rendered (same behaviour as Windows on the same dump), audio, keyboard/mouse and
 (byte-identical PS4 format, shared with Windows), the launcher and the updater. Not yet tested: a real Steam Deck
 (controls, touch, Game Mode), Wayland desktops, and online play against the live lobby server. Feedback is welcome
 on Discord or through the launcher's Report a Bug page. Saves, settings and logs live in
-`${XDG_DATA_HOME:-~/.local/share}/OpenCrown/`.
+`${XDG_DATA_HOME:-~/.local/share}/OpenCrown/` (on macOS: `~/Library/Application Support/OpenCrown/`).

@@ -29,7 +29,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [ ] T5f3b: skip_offers second-ask warning and own_camera (online) in the recompiled build
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
-- [ ] Audio (CoreAudio, clean by ear), input, save data, filesystem paths on macOS
+- [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
+- [ ] Input and the remaining filesystem paths on macOS (game files location, logs)
 - [ ] Menu boot, then first level
 
 ## Phase 5: Rendering
