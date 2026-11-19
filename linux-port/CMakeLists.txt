@@ -248,6 +248,7 @@ target_link_libraries(test_hle PRIVATE dcp_hle)
 add_test(NAME hle COMMAND test_hle)
 add_executable(test_save_check tests/test_save_check.cpp)  # launcher check for unreadable (encrypted) saves
 add_test(NAME save_check COMMAND test_save_check)
+add_test(NAME play_mac COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/play_mac_test.sh ${CMAKE_CURRENT_SOURCE_DIR}/play-mac.sh)  # play-mac.sh in dry mode
 add_executable(test_net tests/test_net.cpp)  # loopback only
 target_link_libraries(test_net PRIVATE dcp_net)
 add_test(NAME net COMMAND test_net)
