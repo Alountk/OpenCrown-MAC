@@ -40,7 +40,7 @@ std::set<uint64_t> parse_hooks(const std::string& text);
 // `#` starts a comment. Throws std::runtime_error on anything else.
 std::map<uint64_t, BytePatch> parse_patches(const std::string& text);
 
-// The `site <hex offset> <hex expected bytes> <target>` lines of the same file (target: `-` none, `ret`, or a hex offset; parse_patches
+// The `site <hex offset> <hex expected bytes> <target>` lines of the same file (target: `-` none, `ret`, `skip` the instruction, or a hex offset; parse_patches
 // skips them). Throws std::runtime_error on a malformed line.
 std::map<uint64_t, SiteHook> parse_sites(const std::string& text);
 

@@ -193,6 +193,8 @@ static dcp::rt::u64 site_redirect(Ctx*) { ++g_site_calls; return 1; }
 static dcp::rt::u64 site_return(Ctx* c) { c->r[dcp::rt::RAX] = 99; return 1; }
 static dcp::rt::u64 site_peek(Ctx* c) { c->r[dcp::rt::RAX] = 5; return 0; }  // result 0: the instruction runs
 
+static uint8_t* g_site_img = nullptr;
+
 static int site_hooks() {
     std::vector<uint8_t> img(0x2000, 0xcc);
     // 0x1000: cmp edi,0; jne 0x100b; mov eax,10; ret; 0x100b: mov eax,20; ret
@@ -218,17 +220,70 @@ static int site_hooks() {
         return std::make_pair(uint32_t(c.r[dcp::rt::RAX]), c.r[dcp::rt::RSP]);
     };
     if (run(3).first != 20 || run(0).first != 10) return std::fprintf(stderr, "e2e: unset site hooks changed the result\n"), 1;
-    if (!dcp::rt::set_site_hook("", 0x1003, site_redirect)) return std::fprintf(stderr, "e2e: site slot not registered\n"), 1;
+    // The generated code lives in its own library, with its own dispatch runtime: the hooks go straight into its slots.
+    auto slot = [&](const char* name) { return reinterpret_cast<dcp::rt::SiteHook*>(dlsym(lib, name)); };
+    if (!slot("dcp_site_1003") || !slot("dcp_site_1005") || !slot("dcp_site_100b")) return std::fprintf(stderr, "e2e: site slots missing\n"), 1;
+    *slot("dcp_site_1003") = site_redirect;
     if (run(0).first != 20 || g_site_calls != 1) return std::fprintf(stderr, "e2e: redirect to the block\n"), 1;  // rdi 0 would give 10
-    dcp::rt::set_site_hook("", 0x1003, nullptr);
-    dcp::rt::set_site_hook("", 0x1005, site_return);
+    *slot("dcp_site_1003") = nullptr;
+    *slot("dcp_site_1005") = site_return;
     auto r = run(0);
     if (r.first != 99 || r.second != sp) return std::fprintf(stderr, "e2e: ret target (eax %u, rsp %llx)\n", r.first, (unsigned long long)r.second), 1;
-    dcp::rt::set_site_hook("", 0x1005, nullptr);
-    dcp::rt::set_site_hook("", 0x100b, site_peek);
+    *slot("dcp_site_1005") = nullptr;
+    *slot("dcp_site_100b") = site_peek;
     if (run(3).first != 20) return std::fprintf(stderr, "e2e: a zero result must run the instruction\n"), 1;  // mov eax,20 overwrites the 5
-    dcp::rt::set_site_hook("", 0x100b, nullptr);
+    *slot("dcp_site_100b") = nullptr;
     if (run(3).first != 20 || run(0).first != 10) return std::fprintf(stderr, "e2e: site hooks did not switch off\n"), 1;
+    return 0;
+}
+
+// A skip site: the hook does the instruction's work (here a call) and the generated code jumps over it. call_guest lets the hook
+// call a function of the guest (here 0x1100: mov eax,7; ret) with arguments and gets its result.
+static unsigned long long (*g_call_guest)(Ctx*, unsigned long long, unsigned long long, unsigned long long) = nullptr;
+static dcp::rt::u64 site_call_guest(Ctx* c) {
+    dcp::rt::u64 base = reinterpret_cast<dcp::rt::u64>(g_site_img);
+    dcp::rt::u64 sp = c->r[dcp::rt::RSP];
+    dcp::rt::u64 r = g_call_guest(c, base + 0x1100, 11, 22);
+    if (c->r[dcp::rt::RSP] != sp) return 0;  // the stack comes back as it was
+    c->r[dcp::rt::RAX] = r + 40;  // 47: the skipped call would have left 7
+    return 1;
+}
+
+static int site_skip() {
+    std::vector<uint8_t> img(0x2000, 0xcc);
+    // 0x1000: call 0x1100; add eax,1; ret      0x1100: mov eax,7; ret
+    const uint8_t a[] = {0xe8, 0xfb, 0x00, 0x00, 0x00, 0x83, 0xc0, 0x01, 0xc3};
+    const uint8_t b[] = {0xb8, 0x07, 0x00, 0x00, 0x00, 0xc3};
+    std::memcpy(img.data() + 0x1000, a, sizeof a);
+    std::memcpy(img.data() + 0x1100, b, sizeof b);
+    g_site_img = img.data();
+    const std::set<uint64_t> fns{0x1000, 0x1100};
+    const SiteMap sites{{0x1000, kSiteSkip}};
+    std::string code = lift_prelude() + lift_declarations(fns, "", {}, {}, sites);
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1000, sizeof a), fns, "", true, {}, {}, sites).code;
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1100, sizeof b), fns, "", true, {}, {}, sites).code;
+    code += lift_function_table(fns, "", {}, {}, sites);
+    code += "extern \"C\" unsigned long long test_call_guest(Ctx* c, unsigned long long fn, unsigned long long a, unsigned long long b) {\n"
+            "  return dcp::rt::call_guest(c, fn, a, b);\n}\n";
+    void* lib = build_and_load(code);
+    if (!lib) return 1;
+    auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register"));
+    auto f = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1000"));
+    g_call_guest = reinterpret_cast<decltype(g_call_guest)>(dlsym(lib, "test_call_guest"));
+    auto slot = reinterpret_cast<dcp::rt::SiteHook*>(dlsym(lib, "dcp_site_1000"));
+    if (!reg || !f || !g_call_guest || !slot) return std::fprintf(stderr, "e2e: missing symbols for the skip site\n"), 1;
+    reg(reinterpret_cast<unsigned long long>(img.data()), img.size());
+    alignas(16) static uint8_t stack[256];
+    const uint64_t sp = reinterpret_cast<uint64_t>(stack) + sizeof stack;
+    auto run = [&] {
+        Ctx c{};
+        c.r[dcp::rt::RSP] = sp - 8;
+        f(&c);
+        return uint32_t(c.r[dcp::rt::RAX]);
+    };
+    if (run() != 8) return std::fprintf(stderr, "e2e: the call should give 7 + 1 without the hook\n"), 1;
+    *slot = site_call_guest;
+    if (uint32_t r = run(); r != 48) return std::fprintf(stderr, "e2e: skip + call_guest gave %u, expected 48\n", r), 1;  // 47 + 1
     return 0;
 }
 
@@ -267,7 +322,7 @@ int main() {
     int fail = 0;
     if (uint32_t(c.r[dcp::rt::RAX]) != 8) std::fprintf(stderr, "e2e: eax = %llu, expected 8\n", (unsigned long long)c.r[dcp::rt::RAX]), ++fail;
     if (c.r[dcp::rt::RSP] != sp) std::fprintf(stderr, "e2e: rsp not restored\n"), ++fail;
-    if (fail || two_modules() || computed_jump() || entry_hook() || byte_patches() || site_hooks()) return 1;
+    if (fail || two_modules() || computed_jump() || entry_hook() || byte_patches() || site_hooks() || site_skip()) return 1;
     std::puts("dispatch e2e: ok");
     return 0;
 }

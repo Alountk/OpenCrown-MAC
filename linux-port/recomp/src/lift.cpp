@@ -920,6 +920,7 @@ struct Lifter {
         emit("u64 go_ = " + n + "(c);");
         emit("DCP_LOAD();");
         if (s->second == kSiteRet) emit("if (go_) { r[RSP] += 8; DCP_SAVE(); return; }");
+        else if (s->second == kSiteSkip) emit(fmt("if (go_) goto S_%llx;", (unsigned long long)in.addr));
         else if (s->second != kSiteNoTarget) emit(fmt("if (go_) goto %s;", label(s->second).c_str()));
         emit("}");
     }
@@ -933,10 +934,17 @@ struct Lifter {
                 emit("} else {");
                 insn(in);
                 emit("}");
+                skip_label(in);
                 return;
             }
         }
         insn(in);
+        skip_label(in);
+    }
+
+    void skip_label(const Insn& in) {  // where a kSiteSkip hook jumps to
+        if (!sites) return;
+        if (auto s = sites->find(in.addr); s != sites->end() && s->second == kSiteSkip) emit(fmt("S_%llx:;", (unsigned long long)in.addr));
     }
 
     LiftResult run() {
@@ -950,7 +958,7 @@ struct Lifter {
         if (sites)  // a site hook's target is a goto label
             for (const auto& [a, b] : fn.blocks)
                 for (const Insn& in : b.insns)
-                    if (auto s = sites->find(in.addr); s != sites->end() && s->second != kSiteNoTarget && s->second != kSiteRet) {
+                    if (auto s = sites->find(in.addr); s != sites->end() && s->second != kSiteNoTarget && s->second != kSiteRet && s->second != kSiteSkip) {
                         if (!fn.blocks.count(s->second))
                             throw std::runtime_error(fmt("site hook at 0x%llx: target 0x%llx does not start a basic block of the function",
                                                          (unsigned long long)in.addr, (unsigned long long)s->second));

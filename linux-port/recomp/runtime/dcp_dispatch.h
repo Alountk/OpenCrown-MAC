@@ -41,6 +41,7 @@ bool set_patch(const char* module, u64 off, bool on);
 // Site hooks (`site` lines of the patch list): one SiteHook slot per hooked instruction, registered like the others. The host function
 // runs just before the instruction, may change registers and memory, and returns non-zero to leave for the line's target.
 void register_site_slot(const char* module, u64 off, SiteHook* slot);
+u64 call_guest(Ctx* c, u64 fn, u64 a0 = 0, u64 a1 = 0, u64 a2 = 0, u64 a3 = 0, u64 a4 = 0, u64 a5 = 0);  // for a hook: calls a guest function
 bool set_site_hook(const char* module, u64 off, SiteHook fn);  // fn = nullptr switches it off; false when no such site exists
 
 // A host function the guest can reach by pointer (an HLE import: the loader stores its address in the guest's GOT).

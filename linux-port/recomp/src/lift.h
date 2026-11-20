@@ -17,9 +17,11 @@ using PatchMap = std::map<uint64_t, std::vector<Insn>>;
 // Site hooks: image offset of an instruction -> where a host hook may send the code. The lifter calls the hook slot
 // `dcp_site_<module>_<hex>` (a SiteHook, null = off) just before that instruction; a non-zero result leaves for the target:
 // kSiteRet returns from the function, any other non-zero value is the image offset of an instruction in the same function
-// (it must start a basic block), kSiteNoTarget (0) ignores the result and the instruction runs.
+// (it must start a basic block), kSiteNoTarget (0) ignores the result and the instruction runs, kSiteSkip jumps over the
+// instruction itself: the hook did its work (a call: result in rax, nothing pushed).
 constexpr uint64_t kSiteNoTarget = 0;
 constexpr uint64_t kSiteRet = ~0ull;
+constexpr uint64_t kSiteSkip = ~0ull - 1;
 using SiteMap = std::map<uint64_t, uint64_t>;
 
 struct LiftResult {
