@@ -22,6 +22,7 @@
 // rax is dead (the lookup returns in rax; B and Y reload it before use in the original code).
 #include "platform/compat.h"
 #include "skip_offers.h"
+#include "skip_warning.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -53,11 +54,7 @@ constexpr Patch kPatches[] = {
 };
 
 #ifdef __x86_64__
-// The second ask: our text replaces message 0x3cc once. ASCII + '\n' only, no '%' (it is a vsnprintf format).
-constexpr char kWarning[] =
-    "Without the skip, this character can't play online\n"
-    "until the first half of the story is finished.\n"
-    "Skip to the talisman collecting? (Player starts at LV15)";
+// The second ask: our text (skip_warning.h) replaces message 0x3cc once.
 
 constexpr uint32_t kLookup = 0x591450, kLookupCont = 0x591456;
 constexpr uint32_t kNoA = 0x3ae3b3, kNoB = 0x3ae3bc, kSetState = 0x3aecd2, kState8 = 0x3ae5f0;
@@ -121,7 +118,7 @@ void install_warning(uint8_t* base) {
     const uint64_t b64 = reinterpret_cast<uint64_t>(base);
     uint8_t* flags = page;            // [0] text_due, [1] in_second
     char* text = reinterpret_cast<char*>(page + 0x10);
-    std::memcpy(text, kWarning, sizeof kWarning);
+    std::memcpy(text, skip_warning::Warning::text(), std::strlen(skip_warning::Warning::text()) + 1);
     uint8_t *L = page + 0x100, *B = page + 0x180, *Y = page + 0x200;
     const uint64_t f64 = reinterpret_cast<uint64_t>(flags);
 
@@ -170,7 +167,58 @@ void install_warning(uint8_t* base) {
     std::fprintf(stderr, "skip_offers: the first \"no\" to the story skip warns and asks again\n");
 }
 
-#endif  // the second-ask warning is x86 relay code: not available in the recompiled build
+#endif  // x86: the second-ask warning is relay code written into the process
+
+#ifndef __x86_64__
+// Recompiled build: the same warning through site hooks (hooks/eboot_patches.txt `site` lines), driven by skip_warning.h.
+//   0x3ae3b3  the first je of the answer test of state 9 (r0 = answer): a first "no" asks again, as relay B does
+//   0x3ae3cb  the first instruction of the "yes" branch
+//   0x591450  entry of the message lookup (esi = id): the warning text replaces message 0x3cc once, then ret
+constexpr uint32_t kNoSite = 0x3ae3b3, kYesSite = 0x3ae3cb, kLookupSite = 0x591450;
+skip_warning::Warning g_warning;
+
+rt::u64 site_no(rt::Ctx* c) {
+    const uint32_t answer = uint32_t(c->r[rt::RAX]);
+    const bool ask_again = g_warning.on_no(answer);
+    if (answer == 0 || answer == 3) std::fprintf(stderr, "skip_offers: \"no\" (answer %u): %s\n", answer, ask_again ? "asking again with the warning" : "final");
+    if (!ask_again) return 0;
+    // The dialog (r14) keeps the answer it was given: put back "no answer yet" (-1, as the game does when it builds one), or the
+    // question that follows would be answered by this "no" before the player sees it.
+    const uint32_t pending = 0xffffffffu;
+    std::memcpy(reinterpret_cast<void*>(c->r[rt::R14] + 1588), &pending, sizeof pending);
+    // SetState(kind, 9) instead of 8: the 0x3ae5f0 sequence with edx = 9, then on to 0x3aecd2 (which makes the call)
+    uint64_t obj = c->r[rt::R13], state_machine;
+    std::memcpy(&state_machine, reinterpret_cast<const void*>(obj), sizeof state_machine);
+    c->r[rt::RAX] = state_machine;
+    c->r[rt::RDX] = 9;
+    c->r[rt::RDI] = obj;
+    c->r[rt::RSI] = uint32_t(c->r[rt::R12]);
+    return 1;
+}
+rt::u64 site_yes(rt::Ctx*) {
+    std::fprintf(stderr, "skip_offers: \"yes\", skipping the story\n");
+    g_warning.on_yes();
+    return 0;
+}
+rt::u64 site_lookup(rt::Ctx* c) {
+    const char* t = g_warning.on_lookup(uint32_t(c->r[rt::RSI]));
+    if (!t) return 0;
+    std::fprintf(stderr, "skip_offers: the question text is replaced by the warning\n");
+    c->r[rt::RAX] = reinterpret_cast<uint64_t>(t);
+    return 1;
+}
+
+void install_warning() {
+    const bool ok = rt::set_site_hook("eboot", kNoSite, site_no) && rt::set_site_hook("eboot", kYesSite, site_yes) &&
+                    rt::set_site_hook("eboot", kLookupSite, site_lookup);
+    if (!ok) {  // all or nothing, as the byte patches
+        for (uint32_t site : {kNoSite, kYesSite, kLookupSite}) rt::set_site_hook("eboot", site, nullptr);
+        std::fprintf(stderr, "skip_offers: the recompiled eboot has no site hooks (dcp_recompile --patches hooks/eboot_patches.txt); no-skip warning not installed\n");
+        return;
+    }
+    std::fprintf(stderr, "skip_offers: the first \"no\" to the story skip warns and asks again\n");
+}
+#endif
 
 }  // namespace
 
@@ -195,6 +243,8 @@ void install(uint8_t* base) {
     }
 #ifdef __x86_64__
     if (!off("DCP_STORY_SKIP") && !off("DCP_SKIP_WARNING")) install_warning(base);
+#else
+    if (!off("DCP_STORY_SKIP") && !off("DCP_SKIP_WARNING")) install_warning();
 #endif
 }
 

@@ -135,6 +135,18 @@ static void test_patch_slots() {
     CHECK(set_patch("pt", 0x40, false) && flag_a == 0);
 }
 
+static u64 site_fn(Ctx*) { return 1; }
+
+static void test_site_slots() {
+    // Generated code registers one SiteHook slot per hooked instruction; the host installs and removes a hook by module and offset.
+    SiteHook slot_a = nullptr, slot_b = nullptr;
+    register_site_slot("st", 0x10, &slot_a);
+    register_site_slot("st", 0x20, &slot_b);
+    CHECK(set_site_hook("st", 0x10, site_fn) && slot_a == site_fn && slot_b == nullptr);
+    CHECK(!set_site_hook("st", 0x30, site_fn) && !set_site_hook("other", 0x10, site_fn));
+    CHECK(set_site_hook("st", 0x10, nullptr) && slot_a == nullptr);
+}
+
 static void test_entry_hook_slots() {
     // Generated code registers one slot per hooked function; the host installs a hook by module and offset.
     EntryHook slot_a = nullptr, slot_b = nullptr;
@@ -151,6 +163,7 @@ int main() {
     test_modules();
     test_entry_hook_slots();
     test_patch_slots();
+    test_site_slots();
     test_large_table();
     test_host_functions();
     if (g_fail) return std::fprintf(stderr, "dispatch: %d check(s) failed\n", g_fail), 1;

@@ -38,6 +38,11 @@ bool set_entry_hook(const char* module, u64 off, EntryHook fn);
 void register_patch_slot(const char* module, u64 off, unsigned char* slot);
 bool set_patch(const char* module, u64 off, bool on);
 
+// Site hooks (`site` lines of the patch list): one SiteHook slot per hooked instruction, registered like the others. The host function
+// runs just before the instruction, may change registers and memory, and returns non-zero to leave for the line's target.
+void register_site_slot(const char* module, u64 off, SiteHook* slot);
+bool set_site_hook(const char* module, u64 off, SiteHook fn);  // fn = nullptr switches it off; false when no such site exists
+
 // A host function the guest can reach by pointer (an HLE import: the loader stores its address in the guest's GOT).
 // `thunk` adapts the guest registers to it (see dcp_abi.h) and pops the return address. Register before running guest code.
 void register_host_function(const void* host_fn, Fn thunk);

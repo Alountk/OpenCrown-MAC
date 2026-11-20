@@ -261,6 +261,37 @@ static void test_indirect_call_operand_order() {
     CHECK(read != std::string::npos && push != std::string::npos && read < push);
 }
 
+static void test_site_hooks() {
+    // 0x1000 cmp edi,0 ; 0x1003 jne 0x100b ; 0x1005 mov eax,10 ; 0x100a ret ; 0x100b mov eax,20 ; 0x1010 ret
+    const uint8_t code[] = {0x83, 0xff, 0x00, 0x75, 0x06, 0xb8, 0x0a, 0x00, 0x00, 0x00, 0xc3, 0xb8, 0x14, 0x00, 0x00, 0x00, 0xc3};
+    const std::set<uint64_t> fns{0x1000};
+    const Function fn = discover_function(code, sizeof code, 0x1000, 0x1000, sizeof code);
+    const SiteMap sites{{0x1000, kSiteNoTarget}, {0x1003, 0x100b}, {0x1005, kSiteRet}};
+    const LiftResult r = lift_function(fn, fns, "eboot", false, {}, {}, sites);
+    const std::string& c = r.code;
+    // The hook runs before its instruction: no target ignores the result, a block start jumps there, ret leaves the function.
+    const size_t s0 = c.find("if (dcp_site_eboot_1000) {"), s3 = c.find("if (dcp_site_eboot_1003) {"), s5 = c.find("if (dcp_site_eboot_1005) {");
+    CHECK(s0 != std::string::npos && s3 != std::string::npos && s5 != std::string::npos && s0 < s3 && s3 < s5);
+    CHECK(c.find("goto L_100b;", s3) < s5);
+    CHECK(c.find("dcp_site_eboot_1000(c)") != std::string::npos && c.find("goto", s0) > s3);  // nothing to jump to for 0x1000
+    CHECK(c.find("return;", s5) != std::string::npos);
+    CHECK(c.find("L_100b:;") != std::string::npos);  // the target gets a label even though nothing else jumps there
+    CHECK(r.sites_hit == std::set<uint64_t>({0x1000, 0x1003, 0x1005}));
+    CHECK(lift_function(fn, fns, "eboot", false).code.find("dcp_site") == std::string::npos);  // nothing changes without sites
+    CHECK(lift_declarations(fns, "eboot", {}, {}, sites).find("extern dcp::rt::SiteHook dcp_site_eboot_1003;") != std::string::npos);
+    CHECK(lift_declarations(fns, "eboot").find("dcp_site") == std::string::npos);
+    const std::string t = lift_function_table(fns, "eboot", {}, {}, sites);
+    CHECK(t.find("dcp::rt::SiteHook dcp_site_eboot_1003 = nullptr;") != std::string::npos);
+    CHECK(t.find("register_site_slot(\"eboot\", 0x1003u, &dcp_site_eboot_1003);") != std::string::npos);
+    CHECK(lift_function_table(fns, "eboot").find("dcp_site") == std::string::npos);
+    // A target that does not start a basic block of the function cannot be a label: refused.
+    bool threw = false;
+    try { lift_function(fn, fns, "eboot", false, {}, {}, SiteMap{{0x1003, 0x1007}}); } catch (const std::runtime_error&) { threw = true; }
+    CHECK(threw);
+    // A site in a function that does not hold the instruction is simply not hit (the emitter reports the ones nobody hit).
+    CHECK(lift_function(fn, fns, "eboot", false, {}, {}, SiteMap{{0x5000, kSiteRet}}).sites_hit.empty());
+}
+
 static void test_cfg() {
     // push rbp; mov rbp,rsp; test edi,edi; jz L; call 0x2000; pop rbp; ret; L: xor eax,eax; pop rbp; ret
     const uint8_t code[] = {0x55, 0x48, 0x89, 0xe5, 0x85, 0xff, 0x74, 0x07, 0xe8, 0xf3, 0x0f, 0x00, 0x00,
@@ -355,6 +386,7 @@ int main() {
     test_declarations();
     test_entry_hooks();
     test_byte_patches();
+    test_site_hooks();
     test_indirect_call_operand_order();
     test_eh_frame();
     if (g_fail) return 1;

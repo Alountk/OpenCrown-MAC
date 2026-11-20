@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
 
 namespace dcp::recomp {
@@ -45,6 +46,10 @@ static std::string hook_name(uint64_t start, const std::string& module) {
     return module.empty() ? fmt("dcp_hook_%llx", (unsigned long long)start) : fmt("dcp_hook_%s_%llx", module.c_str(), (unsigned long long)start);
 }
 
+static std::string site_name(uint64_t addr, const std::string& module) {
+    return module.empty() ? fmt("dcp_site_%llx", (unsigned long long)addr) : fmt("dcp_site_%s_%llx", module.c_str(), (unsigned long long)addr);
+}
+
 struct Lifter {
     const Function& fn;
     const std::set<uint64_t>& functions;
@@ -52,6 +57,7 @@ struct Lifter {
     bool comments = true;
     bool hooked = false;  // the function calls its EntryHook slot on entry
     const PatchMap* patches = nullptr;  // instructions with a runtime-switchable replacement
+    const SiteMap* sites = nullptr;     // instructions preceded by a host hook
     std::string img;  // the C++ name of this module's image base
     LiftResult res;
     std::string body;
@@ -903,7 +909,23 @@ struct Lifter {
         unsupported(in);
     }
 
+    // A host hook before the instruction (see SiteMap): it may change registers and memory; a non-zero result leaves for the target.
+    void site_hook(const Insn& in) {
+        auto s = sites->find(in.addr);
+        if (s == sites->end()) return;
+        res.sites_hit.insert(in.addr);
+        const std::string n = site_name(in.addr, module);
+        emit("if (" + n + ") {");
+        emit("DCP_SAVE();");
+        emit("u64 go_ = " + n + "(c);");
+        emit("DCP_LOAD();");
+        if (s->second == kSiteRet) emit("if (go_) { r[RSP] += 8; DCP_SAVE(); return; }");
+        else if (s->second != kSiteNoTarget) emit(fmt("if (go_) goto %s;", label(s->second).c_str()));
+        emit("}");
+    }
+
     void patched_insn(const Insn& in) {
+        if (sites) site_hook(in);
         if (patches) {
             if (auto p = patches->find(in.addr); p != patches->end()) {
                 emit("if (" + patch_name(in.addr, module) + ") {");
@@ -924,6 +946,16 @@ struct Lifter {
             for (const Insn& in : b.insns)
                 if ((in.flow == Flow::Jump || in.flow == Flow::CondJump) && in.direct && fn.blocks.count(in.target))
                     targets.insert(in.target);
+
+        if (sites)  // a site hook's target is a goto label
+            for (const auto& [a, b] : fn.blocks)
+                for (const Insn& in : b.insns)
+                    if (auto s = sites->find(in.addr); s != sites->end() && s->second != kSiteNoTarget && s->second != kSiteRet) {
+                        if (!fn.blocks.count(s->second))
+                            throw std::runtime_error(fmt("site hook at 0x%llx: target 0x%llx does not start a basic block of the function",
+                                                         (unsigned long long)in.addr, (unsigned long long)s->second));
+                        targets.insert(s->second);
+                    }
 
         for (const auto& [ja, jt] : fn.jump_tables)
             for (uint64_t t : jt.targets)
@@ -958,8 +990,9 @@ std::string function_name(uint64_t start, const std::string& module) {
 }
 
 std::string lift_declarations(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks,
-                             const PatchMap& patches) {
+                             const PatchMap& patches, const SiteMap& sites) {
     std::string out;
+    for (const auto& [site, target] : sites) out += "extern dcp::rt::SiteHook " + site_name(site, module) + ";\n";
     for (const auto& [site, alt] : patches) out += "extern uint8_t " + patch_name(site, module) + ";\n";
     for (uint64_t h : hooks)
         if (functions.count(h)) out += "extern dcp::rt::EntryHook " + hook_name(h, module) + ";\n";
@@ -969,9 +1002,13 @@ std::string lift_declarations(const std::set<uint64_t>& functions, const std::st
 }
 
 std::string lift_function_table(const std::set<uint64_t>& functions, const std::string& module, const std::set<uint64_t>& hooks,
-                                const PatchMap& patches) {
+                                const PatchMap& patches, const SiteMap& sites) {
     const std::string sfx = module.empty() ? "" : "_" + module;
     std::string slots, regs;
+    for (const auto& [site, target] : sites) {
+        slots += "dcp::rt::SiteHook " + site_name(site, module) + " = nullptr;\n";
+        regs += fmt("  dcp::rt::register_site_slot(\"%s\", 0x%llxu, &%s);\n", module.c_str(), (unsigned long long)site, site_name(site, module).c_str());
+    }
     for (uint64_t h : hooks) {
         if (!functions.count(h)) continue;
         slots += "dcp::rt::EntryHook " + hook_name(h, module) + " = nullptr;\n";
@@ -1013,10 +1050,11 @@ using namespace dcp::rt;
 }
 
 LiftResult lift_function(const Function& fn, const std::set<uint64_t>& functions, const std::string& module, bool comments,
-                         const std::set<uint64_t>& hooks, const PatchMap& patches) {
+                         const std::set<uint64_t>& hooks, const PatchMap& patches, const SiteMap& sites) {
     Lifter l(fn, functions, module, comments);
     l.hooked = hooks.count(fn.start) != 0;
     l.patches = &patches;
+    l.sites = &sites;
     return l.run();
 }
 
