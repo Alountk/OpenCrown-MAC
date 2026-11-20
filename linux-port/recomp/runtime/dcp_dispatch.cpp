@@ -70,6 +70,18 @@ bool set_patch(const char* module, u64 off, bool on) {
     return true;
 }
 
+static std::map<std::pair<std::string, u64>, SiteHook*>& site_slots() {
+    static std::map<std::pair<std::string, u64>, SiteHook*> m;
+    return m;
+}
+void register_site_slot(const char* module, u64 off, SiteHook* slot) { site_slots()[{module, off}] = slot; }
+bool set_site_hook(const char* module, u64 off, SiteHook fn) {
+    auto it = site_slots().find({module, off});
+    if (it == site_slots().end()) return false;
+    *it->second = fn;
+    return true;
+}
+
 static Fn lookup(const Module& m, u64 target) {
     const u64 off = target - m.base;  // wraps for targets below the image, which the size check then rejects
     if (off >= m.size) return nullptr;

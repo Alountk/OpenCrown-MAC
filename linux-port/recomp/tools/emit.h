@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "lift.h"
 #include "module.h"
 
 namespace dcp::recomp {
@@ -16,12 +17,19 @@ struct BytePatch {
     std::vector<uint8_t> expect, repl;
 };
 
+// A site hook (see lift.h SiteMap): `expect` are the bytes of the one instruction it sits before, `target` as in SiteMap.
+struct SiteHook {
+    std::vector<uint8_t> expect;
+    uint64_t target = kSiteNoTarget;
+};
+
 struct EmitOptions {
     std::string module;    // name used in symbols and file names ("eboot", "libc", ...)
     std::string out_dir;   // must exist
     int shards = 8;        // function bodies are split over this many files, balanced by instruction count
     bool comments = false; // keep the "// 0x...: instruction" lines (about 40% more text)
     std::set<uint64_t> hooks;  // image offsets of functions that call an EntryHook slot on entry (offsets that are no function are ignored)
+    std::map<uint64_t, SiteHook> sites;     // image offset -> host hook slot called before that instruction (dcp_site_<module>_<hex>)
     std::map<uint64_t, BytePatch> patches;  // image offset -> switchable replacement (dcp_patch_<module>_<hex>), see lift.h PatchMap
 };
 
@@ -31,6 +39,10 @@ std::set<uint64_t> parse_hooks(const std::string& text);
 // A patch list: one patch per line, `<hex offset> <hex expected bytes> <hex replacement bytes>` (both byte strings the same length),
 // `#` starts a comment. Throws std::runtime_error on anything else.
 std::map<uint64_t, BytePatch> parse_patches(const std::string& text);
+
+// The `site <hex offset> <hex expected bytes> <target>` lines of the same file (target: `-` none, `ret`, or a hex offset; parse_patches
+// skips them). Throws std::runtime_error on a malformed line.
+std::map<uint64_t, SiteHook> parse_sites(const std::string& text);
 
 struct EmitStats {
     size_t functions = 0, insns = 0, files = 0, unsupported = 0;

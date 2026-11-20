@@ -46,6 +46,7 @@ struct Ctx {
 // A host function that runs when a hooked recompiled function is entered, with the registers of the call (rdi, rsi, ... and the
 // return address at [rsp]); the function body runs afterwards.
 using EntryHook = void (*)(Ctx*);
+using SiteHook = u64 (*)(Ctx*);  // a site hook (dcp_recompile --patches "site" lines): non-zero leaves for the line's target
 static_assert(__builtin_offsetof(Ctx, x) == 160, "the differential test's assembly trampoline hard-codes this layout");
 
 // The guest context of the guest code that is currently calling into the host on this thread (set while an HLE thunk runs),

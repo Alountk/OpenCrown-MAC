@@ -154,6 +154,28 @@ static void test_emit_and_run() {
     CHECK(refused);
     o.patches.clear();
 
+    // Site hooks: a host hook slot before the instruction at 0x100; refused like a patch when it does not belong to this module.
+    o.out_dir = dir + "/s";
+    o.sites = {{0x100, {{0xb8, 0x05, 0x00, 0x00, 0x00}, kSiteNoTarget}}};
+    mkdir(o.out_dir.c_str(), 0700);
+    emit_module(m, o);
+    CHECK(read_file(o.out_dir + "/m_000.cpp").find("if (dcp_site_m_100) {") != std::string::npos);
+    CHECK(read_file(o.out_dir + "/m_table.cpp").find("register_site_slot(\"m\", 0x100u, &dcp_site_m_100);") != std::string::npos);
+    CHECK(read_file(dir + "/m_000.cpp").find("dcp_site") == std::string::npos);  // no sites requested: no site code
+    for (const SiteHook& bad : {SiteHook{{0xb8, 0x06, 0x00, 0x00, 0x00}, kSiteNoTarget},   // other bytes
+                                SiteHook{{0xb8, 0x05, 0x00}, kSiteNoTarget},                 // not a whole instruction
+                                SiteHook{{0xb8, 0x05, 0x00, 0x00, 0x00}, 0x777}}) {         // target is no block of the function
+        refused = false;
+        o.sites = {{0x100, bad}};
+        try { emit_module(m, o); } catch (const std::runtime_error&) { refused = true; }
+        CHECK(refused);
+    }
+    refused = false;
+    o.sites = {{0x3f0, {{0xcc}, kSiteNoTarget}}};  // inside the module but in no function
+    try { emit_module(m, o); } catch (const std::runtime_error&) { refused = true; }
+    CHECK(refused);
+    o.sites.clear();
+
     // The shards build and run: compile them with the dispatch runtime, register, call function 1.
     const std::string cmd = std::string(DCP_TEST_CXX) + " " + DCP_TEST_ARCH + " -std=c++20 -O1 -shared -fPIC -I" DCP_TEST_RT_DIR " -o " + dir +
                             "/m.so " + dir + "/m_000.cpp " + dir + "/m_001.cpp " + dir + "/m_table.cpp " DCP_TEST_RT_DIR "/dcp_dispatch.cpp > " + dir + "/cc.log 2>&1";
@@ -253,6 +275,23 @@ static void test_parse_patches() {
     }
 }
 
+static void test_parse_sites() {
+    // `site <hex offset> <hex expected bytes> <target>`: a host hook that runs before the instruction there; target is `-` (none),
+    // `ret` (leave the function) or the hex offset of an instruction the hook can jump to. Byte patches and sites share one file.
+    const std::string file = "# warning\n3aeda9 7507 6690\nsite 3ae3b3 0f84 3aecd2  # no\nsite 591450 31c0 ret\nsite 3ae3cb 4c89fb -\n";
+    const auto s = parse_sites(file);
+    CHECK(s.size() == 3);
+    CHECK(s.at(0x3ae3b3).expect == std::vector<uint8_t>({0x0f, 0x84}) && s.at(0x3ae3b3).target == 0x3aecd2);
+    CHECK(s.at(0x591450).target == kSiteRet && s.at(0x3ae3cb).target == kSiteNoTarget);
+    CHECK(parse_patches(file).size() == 1);  // the site lines are not patches
+    CHECK(parse_sites("3aeda9 7507 6690\n").empty() && parse_sites("").empty());
+    for (const char* bad : {"site 12zz be -\n", "site 10 be\n", "site 10 b -\n", "site 10 be - x\n", "site 10 be zz\n", "site 10 be 0\n"}) {
+        bool threw = false;
+        try { parse_sites(bad); } catch (const std::runtime_error&) { threw = true; }
+        CHECK(threw);
+    }
+}
+
 static void test_repo_guard() {
     // Generated sources must not end up in a git work tree (they are derived from the user's game files).
     const char* t = getenv("TMPDIR");
@@ -277,6 +316,7 @@ int main() {
     test_emit_and_run();
     test_parse_hooks();
     test_parse_patches();
+    test_parse_sites();
     test_repo_guard();
     test_complete_functions();
     test_tail_jump_into_a_function();

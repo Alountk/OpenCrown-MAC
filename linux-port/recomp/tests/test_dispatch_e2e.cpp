@@ -186,6 +186,52 @@ static int byte_patches() {
     return 0;
 }
 
+// A site hook runs before its instruction in the generated code: it can change registers, redirect to a basic block of the
+// function, or return from it; with no hook set the function is unchanged.
+static uint64_t g_site_calls = 0;
+static dcp::rt::u64 site_redirect(Ctx*) { ++g_site_calls; return 1; }
+static dcp::rt::u64 site_return(Ctx* c) { c->r[dcp::rt::RAX] = 99; return 1; }
+static dcp::rt::u64 site_peek(Ctx* c) { c->r[dcp::rt::RAX] = 5; return 0; }  // result 0: the instruction runs
+
+static int site_hooks() {
+    std::vector<uint8_t> img(0x2000, 0xcc);
+    // 0x1000: cmp edi,0; jne 0x100b; mov eax,10; ret; 0x100b: mov eax,20; ret
+    const uint8_t b[] = {0x83, 0xff, 0x00, 0x75, 0x06, 0xb8, 0x0a, 0x00, 0x00, 0x00, 0xc3, 0xb8, 0x14, 0x00, 0x00, 0x00, 0xc3};
+    std::memcpy(img.data() + 0x1000, b, sizeof b);
+    const std::set<uint64_t> fns{0x1000};
+    const SiteMap sites{{0x1003, 0x100b}, {0x1005, kSiteRet}, {0x100b, kSiteNoTarget}};
+    std::string code = lift_prelude() + lift_declarations(fns, "", {}, {}, sites);
+    code += lift_function(discover_function(img.data(), img.size(), 0, 0x1000, sizeof b), fns, "", true, {}, {}, sites).code;
+    code += lift_function_table(fns, "", {}, {}, sites);
+    void* lib = build_and_load(code);
+    if (!lib) return 1;
+    auto reg = reinterpret_cast<void (*)(unsigned long long, unsigned long long)>(dlsym(lib, "dcp_register"));
+    auto f = reinterpret_cast<void (*)(Ctx*)>(dlsym(lib, "f_1000"));
+    if (!reg || !f) return std::fprintf(stderr, "e2e: missing symbols for the site hooks\n"), 1;
+    reg(reinterpret_cast<unsigned long long>(img.data()), img.size());
+    alignas(16) static uint8_t stack[256];
+    const uint64_t sp = reinterpret_cast<uint64_t>(stack) + sizeof stack;
+    auto run = [&](uint64_t rdi) {
+        Ctx c{};
+        c.r[dcp::rt::RSP] = sp - 8, c.r[dcp::rt::RDI] = rdi;
+        f(&c);
+        return std::make_pair(uint32_t(c.r[dcp::rt::RAX]), c.r[dcp::rt::RSP]);
+    };
+    if (run(3).first != 20 || run(0).first != 10) return std::fprintf(stderr, "e2e: unset site hooks changed the result\n"), 1;
+    if (!dcp::rt::set_site_hook("", 0x1003, site_redirect)) return std::fprintf(stderr, "e2e: site slot not registered\n"), 1;
+    if (run(0).first != 20 || g_site_calls != 1) return std::fprintf(stderr, "e2e: redirect to the block\n"), 1;  // rdi 0 would give 10
+    dcp::rt::set_site_hook("", 0x1003, nullptr);
+    dcp::rt::set_site_hook("", 0x1005, site_return);
+    auto r = run(0);
+    if (r.first != 99 || r.second != sp) return std::fprintf(stderr, "e2e: ret target (eax %u, rsp %llx)\n", r.first, (unsigned long long)r.second), 1;
+    dcp::rt::set_site_hook("", 0x1005, nullptr);
+    dcp::rt::set_site_hook("", 0x100b, site_peek);
+    if (run(3).first != 20) return std::fprintf(stderr, "e2e: a zero result must run the instruction\n"), 1;  // mov eax,20 overwrites the 5
+    dcp::rt::set_site_hook("", 0x100b, nullptr);
+    if (run(3).first != 20 || run(0).first != 10) return std::fprintf(stderr, "e2e: site hooks did not switch off\n"), 1;
+    return 0;
+}
+
 int main() {
     std::vector<uint8_t> img(0x2000, 0xcc);
     // 0x1000: lea rcx,[rip+0xf9] (-> 0x1100); call rcx; add eax,1; ret
@@ -221,7 +267,7 @@ int main() {
     int fail = 0;
     if (uint32_t(c.r[dcp::rt::RAX]) != 8) std::fprintf(stderr, "e2e: eax = %llu, expected 8\n", (unsigned long long)c.r[dcp::rt::RAX]), ++fail;
     if (c.r[dcp::rt::RSP] != sp) std::fprintf(stderr, "e2e: rsp not restored\n"), ++fail;
-    if (fail || two_modules() || computed_jump() || entry_hook() || byte_patches()) return 1;
+    if (fail || two_modules() || computed_jump() || entry_hook() || byte_patches() || site_hooks()) return 1;
     std::puts("dispatch e2e: ok");
     return 0;
 }

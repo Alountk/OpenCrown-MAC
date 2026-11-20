@@ -57,7 +57,9 @@ int main(int argc, char** argv) {
         if (!patches_file.empty()) {
             std::ifstream f(patches_file);
             if (!f) return std::fprintf(stderr, "dcp_recompile: cannot read %s\n", patches_file.c_str()), 1;
-            o.patches = parse_patches(std::string((std::istreambuf_iterator<char>(f)), {}));
+            const std::string text((std::istreambuf_iterator<char>(f)), {});
+            o.patches = parse_patches(text);
+            o.sites = parse_sites(text);
         }
         const LoadedModule m = load_module(path);
         const EmitStats st = emit_module(m, o);
