@@ -1,5 +1,7 @@
 # Byte patches the host switches at run time (dcp_recompile eboot.bin out --patches this_file).
 # <image offset> <expected bytes> <replacement bytes>; the expected bytes make the recompile fail on another build of the game.
+# site <image offset> <expected bytes> <target>: a host hook (rt::set_site_hook) that runs before that instruction; a non-zero
+# result leaves for the target: `ret`, the offset of a basic block of the same function, or `-` (the result is ignored).
 
 # confirm_button: Japanese layout (DCP_CONFIRM=circle), see src/hle/confirm_button.cpp
 176c0   41c784243401000001000000   41c784243401000000000000
@@ -9,3 +11,8 @@
 # skip_offers: story skip (DCP_STORY_SKIP) and tutorial question (DCP_TUTORIAL_SKIP), see src/hle/skip_offers.cpp
 3aeda9  7507                       6690
 3a8adb  0f8444050000               660f1f440000
+
+# skip_offers: warning on the first "no" to the story skip (DCP_SKIP_WARNING), see src/hle/skip_offers.cpp and skip_warning.h
+site 3ae3b3  0f8437020000          3aecd2
+site 3ae3cb  4c89fb                -
+site 591450  31c0                  ret

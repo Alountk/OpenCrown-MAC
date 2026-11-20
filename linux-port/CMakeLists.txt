@@ -265,6 +265,8 @@ add_executable(test_launcher_platform tests/test_launcher_platform.cpp)  # launc
 add_test(NAME launcher_platform COMMAND test_launcher_platform)
 add_executable(test_yield_throttle tests/test_yield_throttle.cpp)  # busy-wait throttle (header only)
 add_test(NAME yield_throttle COMMAND test_yield_throttle)
+add_executable(test_skip_warning tests/test_skip_warning.cpp)  # no-skip warning state machine (header only)
+add_test(NAME skip_warning COMMAND test_skip_warning)
 add_executable(test_texwatch tests/test_texwatch.cpp)  # concurrent faults on one protected page
 target_link_libraries(test_texwatch PRIVATE dcp_texwatch)
 add_test(NAME texwatch COMMAND test_texwatch)
