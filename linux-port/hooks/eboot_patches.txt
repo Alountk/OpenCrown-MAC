@@ -16,3 +16,22 @@
 site 3ae3b3  0f8437020000          3aecd2
 site 3ae3cb  4c89fb                -
 site 591450  31c0                  ret
+
+# own_camera: separate cameras in online adventures (DCP_OWN_CAMERA), see src/hle/own_camera.cpp. Each line is a call the host code
+# stands in for (skip) or a function entry / tail jump it may answer instead (ret).
+site 374c7a  e881fdf4ff            skip   # camera player of a slot, with the caller
+site 374d7a  e881fcf4ff            skip
+site 372845  e8b621f5ff            skip   # camera player of a slot
+site 372b25  e8d61ef5ff            skip
+site 371a30  55                    ret    # camera command receive: mute what the room does not want
+site 371d98  ff9068010000          skip   # camera command send (call [rax+0x168]), applied locally too
+site 371e3c  ff9068010000          skip
+site 371eeb  ff9068010000          skip
+site 371f51  ff9068010000          skip
+site 371fb8  ff9068010000          skip
+site 4648ea  e8a1020000            skip   # fight lock: group in view
+site 464ae2  e849030000            skip   # fight lock: enemies left in the group
+site 464b53  e898c8baff            skip   # fight lock: camera lease, left edge
+site 464b65  e9a6c8baff            ret    # fight lock: camera lease, right edge (a tail jump)
+site 0f3ed8  e873d5f1ff            skip   # fight lock: clamp
+site 0f3f5e  e8edd4f1ff            skip

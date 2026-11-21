@@ -27,7 +27,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] T5f1/T5f2: entry hooks for recompiled functions; render observers installed (21 functions), draws captured on arm64
 - [x] T5f3: confirm_button and skip_offers (story/tutorial offers) as run-time switchable byte patches (`dcp_recompile --patches hooks/eboot_patches.txt`)
 - [x] T5f3b-1: skip_offers second-ask warning in the recompiled build, through site hooks (`site` lines of the patch list)
-- [ ] T5f3b-2: own_camera (separate cameras online) in the recompiled build, on the same site hooks
+- [x] T5f3b-2: own_camera (separate cameras online) in the recompiled build, on the same site hooks; checked by hand with two copies on one Mac
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
