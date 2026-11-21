@@ -65,6 +65,8 @@ extern char** environ;
 #include "platform.h"
 #include "../common/input_defaults.h"
 #include "../common/save_check.h"
+#include "pad_images.h"
+#include "pad_layout.h"
 #include "pad_setup.h"
 #include "imgui.h"
 #include "imgui_impl_opengl3.h"
@@ -691,11 +693,9 @@ bool load_gl() {  // after the context is current
     return need;
 }
 
-// PNG -> RGBA8 texture; {} on failure (or empty path). win: also make it the window icon.
-Tex load_texture(const std::string& path, SDL_Window* win = nullptr) {
+// A decoded PNG (taken over, may be null) -> RGBA8 texture; {} on failure. win: also make it the window icon.
+Tex upload_png(SDL_Surface* png, SDL_Window* win) {
     Tex t;
-    if (path.empty()) return t;
-    SDL_Surface* png = SDL_LoadPNG(path.c_str());
     // ABGR8888 = R, G, B, A bytes in memory (GL_RGBA / GL_UNSIGNED_BYTE), rows packed (pitch = w * 4).
     SDL_Surface* rgba = png ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_ABGR8888) : nullptr;
     if (png) SDL_DestroySurface(png);
@@ -722,6 +722,16 @@ Tex load_texture(const std::string& path, SDL_Window* win = nullptr) {
             SDL_DestroySurface(icon);
         }
     return t;
+}
+
+// PNG file -> texture; {} on failure (or empty path).
+Tex load_texture(const std::string& path, SDL_Window* win = nullptr) {
+    return path.empty() ? Tex{} : upload_png(SDL_LoadPNG(path.c_str()), win);
+}
+
+// PNG bytes in memory -> texture; {} on failure.
+Tex load_texture_mem(const unsigned char* data, size_t size) {
+    return upload_png(SDL_LoadPNG_IO(SDL_IOFromConstMem(data, size), true), nullptr);
 }
 
 // Background + logo (also the window icon) for the current dump folder; reloaded when the folder changes. The binary
@@ -1013,6 +1023,107 @@ void draw_notes(const std::vector<dcp::net::update::NoteLine>& lines, ImFont* fo
 
 template <class Act>
 void draw_friend_lists(const dcp::net::FriendsState& L, bool busy, Act act, std::string& confirm_remove, float scale);
+
+// Controls page, controller view: one of the DualShock 4 line drawings (assets/: the front view for the buttons, the top view for the
+// shoulder buttons) with, in a column to each side of the window, a clickable label per button (its name and the key bound to it,
+// pad_layout.h) joined to the button by a line. The button is coloured while its label is hovered. `conflicted(binding)` marks a key
+// used by two actions. Returns the index of the clicked binding, or -1.
+template <class Conflict>
+int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, dcp::padlayout::View view, const Conflict& conflicted) {
+    using namespace dcp::padlayout;
+    static const Tex front_img = load_texture_mem(kPad_front_png, kPad_front_png_size);  // first use: the GL context exists by then
+    static const Tex top_img = load_texture_mem(kPad_top_png, kPad_top_png_size);
+    const Tex& img = view == View::Front ? front_img : top_img;
+    const float iw = view == View::Front ? kFrontW : kTopW, ih = view == View::Front ? kFrontH : kTopH;
+    const float lh = ImGui::GetTextLineHeight();
+
+    struct Item {
+        const Zone* z;
+        int idx;
+        std::string key;
+    };
+    std::vector<Item> items;
+    float label_w = 0;  // every label as wide as the longest one: neat columns
+    for (const Zone& z : zones()) {
+        int idx = -1;
+        for (int i = 0; i < int(binds.size()); ++i)
+            if (binds[i].action == z.action) idx = i;
+        if (idx < 0 || z.view != view) continue;
+        const Binding& b = binds[idx];
+        items.push_back({&z, idx, capture == idx ? "..." : b.value.empty() ? "-" : short_key(b.value)});
+        label_w = std::max(label_w, ImGui::CalcTextSize(z.label).x + ImGui::CalcTextSize("    ").x + ImGui::CalcTextSize(items.back().key.c_str()).x + 20);
+    }
+    const float margin = 14;  // least room between a column and the drawing (for the lines)
+    const float step = lh + 14, pill_h = lh + 8;  // distance between two labels of a column, and a label's height
+
+    // The block's height: the drawing, or its fullest label column when that is taller (the drawing is then centred).
+    float need = 0;
+    for (const bool left : {true, false}) {
+        int n = 0;
+        for (const Item& it : items) n += label_on_left(*it.z) == left;
+        if (n) need = std::max(need, float(n - 1) * step + pill_h);
+    }
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    // The largest scale the width allows, or else the largest one whose block fits the height.
+    float k_lo = 0.15f, k_hi = (avail.x - 2 * (label_w + margin)) / iw;
+    if (k_hi > k_lo && std::max(ih * k_hi, need) > max_h) {
+        for (int i = 0; i < 24; ++i) {
+            const float mid = (k_lo + k_hi) * 0.5f;
+            (std::max(ih * mid, need) <= max_h ? k_lo : k_hi) = mid;
+        }
+        k_hi = k_lo;
+    }
+    const float k = std::max(k_lo, k_hi);
+    const float block_h = std::max(ih * k, need);
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const ImVec2 o(start.x + (avail.x - iw * k) * 0.5f, start.y + (block_h - ih * k) * 0.5f);  // the drawing, centred in its block
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 line = IM_COL32(179, 133, 66, 255), line_dim = IM_COL32(179, 133, 66, 150);
+    if (img.id) dl->AddImage(tex_id(img), o, ImVec2(o.x + iw * k, o.y + ih * k));
+
+    int clicked = -1;
+    for (const bool left : {true, false}) {
+        std::vector<const Item*> col_items;
+        std::vector<float> want;
+        for (const Item& it : items)
+            if (label_on_left(*it.z) == left) col_items.push_back(&it), want.push_back(o.y + it.z->cy * k);
+        const std::vector<float> ys = spread(want, step, start.y + pill_h * 0.5f, start.y + block_h - pill_h * 0.5f);
+        const float px0 = left ? start.x : start.x + avail.x - label_w;
+        for (size_t n = 0; n < col_items.size(); ++n) {
+            const Item& it = *col_items[n];
+            const Binding& b = binds[it.idx];
+            const bool cap = capture == it.idx;
+            const ImVec2 a(px0, ys[n] - pill_h * 0.5f), e(px0 + label_w, ys[n] + pill_h * 0.5f);
+            const ImVec2 anchor(o.x + it.z->cx * k, o.y + it.z->cy * k);
+            ImGui::SetCursorScreenPos(a);
+            ImGui::PushID(it.z->action);
+            if (ImGui::InvisibleButton("##zone", ImVec2(e.x - a.x, e.y - a.y))) clicked = it.idx;
+            const bool hot = ImGui::IsItemHovered(), bad = conflicted(b);
+            ImGui::PopID();
+            if (hot || cap) {  // the button itself, coloured
+                const ImVec2 hc(o.x + it.z->hx * k, o.y + it.z->hy * k), hs(it.z->rx * k, it.z->ry * k);
+                dl->AddRectFilled(ImVec2(hc.x - hs.x, hc.y - hs.y), ImVec2(hc.x + hs.x, hc.y + hs.y), IM_COL32(250, 170, 60, 110), it.z->rd * k);
+                dl->AddRect(ImVec2(hc.x - hs.x, hc.y - hs.y), ImVec2(hc.x + hs.x, hc.y + hs.y), IM_COL32(255, 200, 100, 255), it.z->rd * k, ImDrawFlags_None, 2.0f);
+            }
+            const ImVec2 from(left ? e.x : a.x, ys[n]);
+            dl->AddLine(from, anchor, hot || cap ? line : line_dim, hot || cap ? 2.0f : 1.0f);
+            dl->AddCircleFilled(anchor, hot || cap ? 5.0f : 3.5f, line);
+            dl->AddRectFilled(a, e, cap ? line : hot ? IM_COL32(110, 78, 40, 255) : IM_COL32(40, 30, 21, 235), 3);
+            dl->AddRect(a, e, bad ? IM_COL32(250, 158, 77, 255) : line, 3, ImDrawFlags_None, bad ? 2.0f : 1.0f);
+            const ImVec2 ksz = ImGui::CalcTextSize(it.key.c_str());
+            dl->AddText(ImVec2(a.x + 7, ys[n] - lh * 0.5f), cap ? IM_COL32(30, 18, 8, 255) : IM_COL32(190, 175, 150, 255), it.z->label);
+            dl->AddText(ImVec2(e.x - 7 - ksz.x, ys[n] - lh * 0.5f), cap ? IM_COL32(30, 18, 8, 255) : b.value.empty() ? IM_COL32(150, 140, 120, 255) : IM_COL32(237, 224, 199, 255), it.key.c_str());
+            if (hot) {
+                auto lab = kLabels.find(b.action);
+                ImGui::SetTooltip("%s: %s", lab != kLabels.end() ? lab->second : b.action.c_str(), b.value.empty() ? "(unbound)" : pretty(b.value).c_str());
+            }
+        }
+    }
+    ImGui::SetCursorScreenPos(start);
+    ImGui::Dummy(ImVec2(avail.x, block_h));
+    return clicked;
+}
 
 // Friends block of the Online page. confirm_remove: account id whose Remove was clicked once (second click removes).
 void draw_friends(FriendsJob& fj, const Settings& set, const dcp::net::Identity& ident, std::string& add_code,
@@ -2211,9 +2322,21 @@ int main(int argc, char** argv) {
                     if (!b.value.empty() && b.action != "fairy_tap" && b.action != "pointer_tap") users[key_of(b.value)].push_back(b.action);
                 ImGui::TextColored(kDim, "Click a binding, then press a key or mouse button. Esc cancels, "
                                          "Backspace/Delete clears.");
+                static bool pad_view = true;  // controller drawing (default) or the full list
+                if (ImGui::RadioButton("Controller", pad_view)) pad_view = true;
+                ImGui::SameLine();
+                if (ImGui::RadioButton("List (all actions)", !pad_view)) pad_view = false;
                 // The slider, the two checkboxes and the button row fit under the table (no page scrolling).
                 float table_h = ImGui::GetContentRegionAvail().y - ImGui::GetFrameHeightWithSpacing() * 4.0f;
-                if (ImGui::BeginTable("##binds", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                if (pad_view) {
+                    // Both drawings one under the other, each as large as the page allows; the page's own scrolling reaches the second.
+                    auto conflict = [&](const Binding& b) { return !b.value.empty() && users[key_of(b.value)].size() > 1; };
+                    int hit = draw_pad_view(ctl.binds, capture, table_h, dcp::padlayout::View::Front, conflict);
+                    ImGui::Dummy(ImVec2(0, 12 * scale));
+                    const int hit2 = draw_pad_view(ctl.binds, capture, table_h, dcp::padlayout::View::Top, conflict);
+                    if (hit2 >= 0) hit = hit2;
+                    if (hit >= 0) capture = hit;
+                } else if (ImGui::BeginTable("##binds", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
                                                         ImGuiTableFlags_ScrollY, ImVec2(0, table_h))) {
                     ImGui::TableSetupScrollFreeze(0, 1);
                     ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch, 1.0f);
