@@ -441,14 +441,35 @@ bool dump_ok(const std::vector<Check>& v) {
 
 // ---- game process ----
 
+#ifdef __APPLE__
+constexpr bool kMac = true;
+#else
+constexpr bool kMac = false;
+#endif
+
 struct Game {
     pid_t proc = 0;
+    bool stopping = false;         // Stop was pressed: the exit is not a failure
+    Uint64 stop_ms = 0;            // when (SDL_GetTicks), to escalate to SIGKILL
     unsigned long exit_code = 0;   // exit status, or 128 + signal number when killed by a signal (shell convention)
     bool failed = false;           // last run exited non-zero (or could not start)
     std::vector<std::string> tail; // last lines of the log after a failure
     bool show_tail = false;        // open the log popup on the next frame
     std::string error;             // launch error
 };
+
+// The step markers of play-mac.sh in the log (platform.h phase_markers), whatever the compiler printed in between.
+std::vector<std::string> log_phase_markers(const std::string& path) {
+    std::ifstream f(path);
+    std::deque<std::string> d;
+    std::string line;
+    while (std::getline(f, line))
+        if (dcp::launcher::is_phase_marker(line)) {
+            d.push_back(line);
+            if (d.size() > 40) d.pop_front();
+        }
+    return {d.begin(), d.end()};
+}
 
 std::vector<std::string> log_tail(const std::string& path, size_t n) {
     std::ifstream f(path);
@@ -529,6 +550,7 @@ bool start_game(Game& g, const Settings& s, const std::string& user, const std::
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
     dcp::launcher::keep_only_stdio(&fa, &attr, {});
+    dcp::launcher::own_process_group(&attr, kMac);
     const std::string dir = exe_dir();
     posix_spawn_file_actions_addchdir_np(&fa, dir.c_str());
     pid_t pid = 0;
@@ -538,17 +560,30 @@ bool start_game(Game& g, const Settings& s, const std::string& user, const std::
     // glibc reports a failed exec / file action (log not writable) as the spawn's own error.
     if (rc != 0) { g.error = "cannot start dcp_run: " + std::string(std::strerror(rc)) + " (log " + log_path + ")"; return false; }
     g.proc = pid;
+    g.stopping = false;
     g.failed = false, g.tail.clear(), g.error.clear();
     return true;
+}
+
+// Stop button (macOS): asks the child and everything it started to end; poll_game escalates if it does not.
+void stop_game(Game& g) {
+    if (!g.proc || g.stopping) return;
+    g.stopping = true, g.stop_ms = SDL_GetTicks();
+    kill(dcp::launcher::stop_target(g.proc, kMac), SIGTERM);
 }
 
 // Called each frame: notices the game's exit.
 void poll_game(Game& g, const std::string& log_path) {
     int status = 0;
-    if (!g.proc || waitpid(g.proc, &status, WNOHANG) != g.proc) return;
+    if (!g.proc) return;
+    if (waitpid(g.proc, &status, WNOHANG) != g.proc) {
+        if (g.stopping && SDL_GetTicks() - g.stop_ms > 5000) kill(dcp::launcher::stop_target(g.proc, kMac), SIGKILL);  // ignored SIGTERM
+        return;
+    }
     g.exit_code = WIFEXITED(status) ? unsigned(WEXITSTATUS(status)) : WIFSIGNALED(status) ? 128u + WTERMSIG(status) : 1u;
     g.proc = 0;
-    g.failed = g.exit_code != 0;
+    g.failed = g.exit_code != 0 && !g.stopping;  // a stop the user asked for is not a failure
+    g.stopping = false;
     if (g.failed) g.tail = log_tail(log_path, 30), g.show_tail = true;
 }
 
@@ -1814,11 +1849,6 @@ int main(int argc, char** argv) {
     UpdateJob upd;
     const std::string appimage = appimage_path();
     if (!appimage.empty() && !selftest) ::unlink((appimage + ".part").c_str());  // leftover of an interrupted update
-#ifdef __APPLE__
-    constexpr bool kMac = true;
-#else
-    constexpr bool kMac = false;
-#endif
     const bool updater = dcp::launcher::updater_supported(kMac);
     if (updater && set.check_updates && !selftest) upd.check();
     std::string relaunch_error;
@@ -1877,7 +1907,7 @@ int main(int argc, char** argv) {
         bool script_log = false, script_stop = false;
         if (script.active())
             script.step(script_frame++, game.proc != 0, win, &shot_path, &script_log, &script_stop, &quit);
-        if (script_stop && game.proc) kill(game.proc, SIGTERM);
+        if (script_stop && game.proc) kMac ? stop_game(game) : (void)kill(game.proc, SIGTERM);  // Linux: as before
         if (game.proc && !script.active()) SDL_WaitEventTimeout(nullptr, 100);  // idle while the game runs
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
@@ -2671,7 +2701,7 @@ int main(int argc, char** argv) {
             static std::string phase;
             static double phase_t = -1;
             if (running) {
-                if (ImGui::GetTime() - phase_t > 0.5) phase = dcp::launcher::play_phase(log_tail(log_path, 60)), phase_t = ImGui::GetTime();
+                if (ImGui::GetTime() - phase_t > 0.5) phase = dcp::launcher::play_phase(log_phase_markers(log_path)), phase_t = ImGui::GetTime();
             } else phase.clear(), phase_t = -1;
             if (running && !phase.empty()) ImGui::TextColored(kDim, "%s", phase.c_str());
             else if (running) ImGui::TextColored(kGood, "The game is running.");
@@ -2714,8 +2744,12 @@ int main(int argc, char** argv) {
             ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.98f, 0.78f, 0.40f, 1));
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.12f, 0.07f, 0.03f, 1));
             if (font_nav) ImGui::PushFont(font_nav);
-            ImGui::BeginDisabled(!can_play);
-            if (ImGui::Button(running ? "Running..." : "PLAY", play) || (pad_play && can_play)) {  // Start = Play
+            // macOS: while play-mac.sh or the game runs, the button stops it (the game window is closed from its own window too).
+            const bool stop_mode = kMac && running;
+            ImGui::BeginDisabled(!can_play && !(stop_mode && !game.stopping));
+            if (stop_mode) {
+                if (ImGui::Button(game.stopping ? "Stopping..." : "STOP", play)) stop_game(game);
+            } else if (ImGui::Button(running ? "Running..." : "PLAY", play) || (pad_play && can_play)) {  // Start = Play
                 save_settings(settings_path, set);
                 // An unreadable save (an encrypted console copy) crashes the game at the title: ask first.
                 bad_saves = dcp::save_check::bad_saves(std::filesystem::path(set.saves.empty() ? saves : set.saves));

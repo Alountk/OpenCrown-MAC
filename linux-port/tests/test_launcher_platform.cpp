@@ -5,6 +5,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <signal.h>
+
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -34,6 +37,39 @@ static bool child_sees_fd(int fd) {
     int st = 0;
     waitpid(pid, &st, 0);
     return WIFEXITED(st) && WEXITSTATUS(st) == 0;
+}
+
+// Spawns `sh -c "sleep 60 & echo $!; wait"` the way the Play button does (own process group when `own_group`), returns its pid and
+// the pid of the sleep it started (read from its stdout).
+static pid_t spawn_with_descendant(bool own_group, pid_t* grandchild) {
+    int p[2];
+    if (pipe(p) != 0) return 0;
+    const char* argv[] = {"/bin/sh", "-c", "sleep 60 & echo $!; wait", nullptr};
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, p[1], 1);
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    dcp::launcher::keep_only_stdio(&fa, &attr, {1, 2});
+    dcp::launcher::own_process_group(&attr, own_group);
+    pid_t pid = 0;
+    int rc = posix_spawn(&pid, "/bin/sh", &fa, &attr, const_cast<char**>(argv), environ);
+    posix_spawn_file_actions_destroy(&fa);
+    posix_spawnattr_destroy(&attr);
+    close(p[1]);
+    char buf[32] = {};
+    ssize_t n = rc == 0 ? read(p[0], buf, sizeof buf - 1) : 0;
+    close(p[0]);
+    *grandchild = n > 0 ? pid_t(std::atoi(buf)) : 0;
+    return rc == 0 ? pid : 0;
+}
+
+static bool gone(pid_t pid) {  // true once the process no longer exists (or is a zombie we do not wait for)
+    for (int i = 0; i < 50; ++i) {
+        if (kill(pid, 0) != 0 && errno == ESRCH) return true;
+        usleep(40000);
+    }
+    return false;
 }
 
 int main() {
@@ -76,6 +112,39 @@ int main() {
     // The self-updater follows the upstream Linux releases (an AppImage): it exists only off macOS.
     CHECK(dcp::launcher::updater_supported(false));
     CHECK(!dcp::launcher::updater_supported(true));
+    // A long build floods the log with ninja progress lines: only the script's own marker lines say which step it is on.
+    {
+        std::vector<std::string> log = {"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10"};
+        for (int i = 1; i <= 400; ++i) log.push_back("[" + std::to_string(i) + "/400] Building CXX object x" + std::to_string(i) + ".o");
+        CHECK(play_phase(dcp::launcher::phase_markers(log)) == "Building the game for this Mac...");
+        CHECK(dcp::launcher::phase_markers(log).size() == 2);
+        std::vector<std::string> many;
+        for (int i = 0; i < 200; ++i) many.push_back("+ cmake --build /w/tools --target dcp_recompile -j10");
+        CHECK(dcp::launcher::phase_markers(many).size() <= 40);  // bounded
+    }
+    // Stop: on macOS the Play button's child (play-mac.sh) leads its own process group and the whole group is stopped, so the builds and
+    // the game it started do not outlive it; elsewhere the child alone is signalled.
+    CHECK(dcp::launcher::stop_target(123, true) == -123 && dcp::launcher::stop_target(123, false) == 123);
+    {
+        pid_t sleeper = 0;
+        pid_t sh = spawn_with_descendant(true, &sleeper);
+        CHECK(sh > 0 && sleeper > 0 && getpgid(sh) == sh && getpgid(sleeper) == sh);
+        if (sh > 0) {
+            kill(dcp::launcher::stop_target(sh, true), SIGTERM);
+            int st = 0;
+            waitpid(sh, &st, 0);
+            CHECK(WIFSIGNALED(st) && WTERMSIG(st) == SIGTERM);
+            CHECK(sleeper > 0 && gone(sleeper));  // the descendant went with it
+        }
+        if (sleeper > 0) kill(sleeper, SIGKILL);
+    }
+    {
+        pid_t sleeper = 0;
+        pid_t sh = spawn_with_descendant(false, &sleeper);
+        CHECK(sh > 0 && getpgid(sh) == getpgid(0));  // not asked: stays in the launcher's group
+        if (sh > 0) kill(sh, SIGKILL), waitpid(sh, nullptr, 0);
+        if (sleeper > 0) kill(sleeper, SIGKILL);
+    }
     if (!g_fail) std::puts("launcher platform: all tests passed");
     return g_fail ? 1 : 0;
 }
