@@ -30,6 +30,8 @@ public:
     // touch_as_mouse is in effect: a left press / drag / release is a finger (gamescope's touch emulation).
     virtual bool left_mouse_is_touch() const = 0;
     virtual void set_blocked(bool b) = 0;  // true: the game reads idle pads (a text box has the keyboard)
+    // macOS: Select + Start held on a gamepad for 2 s (quit_combo.h); never set elsewhere. The render loop ends the game on it.
+    virtual bool quit_requested() const { return false; }
 };
 
 // Steam Deck (SteamDeck=1) or a gamescope session (Game Mode): the same test as mouse_attacks = auto.

@@ -29,6 +29,7 @@
 #include "../common/input_defaults.h"
 #include "hle/input.h"
 #include "render/capture.h"
+#include "quit_combo.h"
 #include "touch_math.h"
 
 namespace {
@@ -202,6 +203,7 @@ public:
     bool kbm_active() const override { return dev_.kbm(); }
     bool left_mouse_is_touch() const override { return mouse_touch(); }
     void set_blocked(bool b) override { blocked_ = b; }
+    bool quit_requested() const override { return quit_.load(); }
 
     void update(SDL_Window* win) override {
         dcp::hle::PadState s[4];
@@ -220,6 +222,12 @@ public:
             pads = pads_;
         }
         for (size_t i = 0; i < pads.size() && i < 4; ++i) read_gamepad(pads[i], &s[i]);
+#ifdef __APPLE__
+        bool combo = false;  // Select + Start on any real gamepad (not the keyboard bindings)
+        for (SDL_Gamepad* g : pads)
+            combo = combo || (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_START));
+        if (quit_combo_.update(combo, SDL_GetTicks())) quit_.store(true);
+#endif
         read_kbm(win, &s[0]);
         std::lock_guard<std::mutex> lk(mu_);
         for (int i = 0; i < 4; ++i) snap_[i] = s[i];
@@ -236,6 +244,8 @@ public:
     }
 
 private:
+    dcp::input::HoldCombo quit_combo_{2000};
+    std::atomic<bool> quit_{false};
     // A finger at window pixel (wx, wy) of a w x h window: a native touch, or the left mouse button under
     // touch_as_mouse. The first finger down sets the fairy target; a short tap with little travel also interacts.
     void on_finger(uint32_t type, int64_t id, float wx, float wy, int w, int h, uint64_t ts) {
