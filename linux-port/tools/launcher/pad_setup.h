@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include <cstdio>
+#include <functional>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -32,9 +33,13 @@ public:
     // Waiting for a press: launcher menus must not act on the controller meanwhile.
     bool capturing() const { return open_ && joy_ && step_ < padmap::kStepCount; }
 
-    void draw(float scale, const ImVec4& dim) {
+    // picture(step target, w, h): optional, draws the controller with the asked-for button marked, in a w x h area.
+    using Picture = std::function<void(const char*, float, float)>;
+    void draw(float scale, const ImVec4& dim, const Picture& picture = {}) {
         if (!open_) return;
-        ImGui::SetNextWindowSize(ImVec2(620 * scale, 300 * scale), ImGuiCond_Always);
+        picture_ = picture;
+        scale_ = scale;
+        ImGui::SetNextWindowSize(ImVec2(620 * scale, (picture ? 560 : 300) * scale), ImGuiCond_Always);
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         if (!ImGui::BeginPopupModal(kTitle, nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove)) return;
         if (ready_) SDL_UpdateJoysticks();
@@ -50,6 +55,8 @@ public:
 
 private:
     static constexpr const char* kTitle = "Controller setup";
+    Picture picture_;
+    float scale_ = 1;
 
     void close() {
         release();
@@ -107,6 +114,7 @@ private:
         ImGui::Spacing();
         ImGui::TextUnformatted(s.prompt);
         ImGui::Spacing();
+        if (picture_) picture_(s.target, ImGui::GetContentRegionAvail().x, 240 * scale_);
         if (!message_.empty()) ImGui::TextColored(dim, "%s", message_.c_str());
         poll_step(s);
         ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetFrameHeightWithSpacing() * 1.5f);

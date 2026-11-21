@@ -10,6 +10,7 @@
 #include <string>
 
 #include "../tools/common/input_defaults.h"
+#include "../tools/common/pad_mapping.h"
 #include "../tools/launcher/pad_layout.h"
 
 static int g_fail = 0;
@@ -105,6 +106,17 @@ int main() {
         CHECK(r[0] == 0 && r[4] == 100 && gaps_ok(r, 25));
         CHECK(spread({}, 10, 0, 10).empty());
     }
+
+    // Controller setup: every step asks for a button that has a zone, and the stick steps point at their direction.
+    for (const auto& step : dcp::padmap::kSteps) {
+        const char* act = action_for_step(step.target);
+        bool found = false;
+        for (const Zone& z : zones()) found = found || (act && std::string(z.action) == act);
+        CHECK(found);
+    }
+    CHECK(std::string(action_for_step("a")) == "cross" && std::string(action_for_step("lefttrigger")) == "l2");
+    CHECK(std::string(action_for_step("leftx")) == "move_right" && std::string(action_for_step("righty")) == "look_down");
+    CHECK(action_for_step("nonsense") == nullptr);
 
     // Key names on a button: long ones are shortened, the rest is left alone.
     CHECK(short_key("Left Shift") == "L-Shift" && short_key("Escape") == "Esc" && short_key("Mouse1") == "LMB");
