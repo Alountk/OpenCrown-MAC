@@ -97,6 +97,13 @@ Fn find_function(u64 target) {
     return nullptr;
 }
 
+u64 call_guest(Ctx* c, u64 fn, u64 a0, u64 a1, u64 a2, u64 a3, u64 a4, u64 a5) {
+    c->r[RDI] = a0, c->r[RSI] = a1, c->r[RDX] = a2, c->r[RCX] = a3, c->r[R8] = a4, c->r[R9] = a5;
+    c->r[RSP] -= 8;  // the return address of a call; nothing reads it, the callee's ret only pops it
+    std::memcpy(reinterpret_cast<void*>(c->r[RSP]), "\0\0\0\0\0\0\0\0", 8);
+    dispatch(c, fn);
+    return c->r[RAX];
+}
 void call_va(Ctx* c, u64 guest_va) { dispatch(c, dcp_img + guest_va); }
 void call_ind(Ctx* c, u64 target) { dispatch(c, target); }
 void jmp_ind(Ctx* c, u64 target) { dispatch(c, target); }

@@ -278,11 +278,11 @@ static void test_parse_patches() {
 static void test_parse_sites() {
     // `site <hex offset> <hex expected bytes> <target>`: a host hook that runs before the instruction there; target is `-` (none),
     // `ret` (leave the function) or the hex offset of an instruction the hook can jump to. Byte patches and sites share one file.
-    const std::string file = "# warning\n3aeda9 7507 6690\nsite 3ae3b3 0f84 3aecd2  # no\nsite 591450 31c0 ret\nsite 3ae3cb 4c89fb -\n";
+    const std::string file = "# warning\n3aeda9 7507 6690\nsite 3ae3b3 0f84 3aecd2  # no\nsite 591450 31c0 ret\nsite 3ae3cb 4c89fb -\nsite 374c7a e881fdf4ff skip\n";
     const auto s = parse_sites(file);
-    CHECK(s.size() == 3);
+    CHECK(s.size() == 4);
     CHECK(s.at(0x3ae3b3).expect == std::vector<uint8_t>({0x0f, 0x84}) && s.at(0x3ae3b3).target == 0x3aecd2);
-    CHECK(s.at(0x591450).target == kSiteRet && s.at(0x3ae3cb).target == kSiteNoTarget);
+    CHECK(s.at(0x591450).target == kSiteRet && s.at(0x3ae3cb).target == kSiteNoTarget && s.at(0x374c7a).target == kSiteSkip);
     CHECK(parse_patches(file).size() == 1);  // the site lines are not patches
     CHECK(parse_sites("3aeda9 7507 6690\n").empty() && parse_sites("").empty());
     for (const char* bad : {"site 12zz be -\n", "site 10 be\n", "site 10 b -\n", "site 10 be - x\n", "site 10 be zz\n", "site 10 be 0\n"}) {

@@ -14,6 +14,9 @@
 
 #include <sys/mman.h>
 
+#ifndef __x86_64__
+#include "dcp_dispatch.h"  // recompiled build: the sites are host hooks (hooks/eboot_patches.txt)
+#endif
 #include "hle.h"
 #include "loader/hle.h"
 #include "net/rudp.h"
@@ -33,6 +36,28 @@ template <class T> T rd(uint64_t a) {
 }
 
 using Fn1 = DCP_SYSV uint64_t (*)(uint64_t);
+
+#ifndef __x86_64__
+// Recompiled build: a host hook gets the guest registers (rt::Ctx) and calls the game through call_guest; the hook that is running
+// sets the context for everything it calls.
+thread_local rt::Ctx* t_ctx = nullptr;
+struct CtxScope {
+    rt::Ctx* prev;
+    explicit CtxScope(rt::Ctx* c) : prev(t_ctx) { t_ctx = c; }
+    ~CtxScope() { t_ctx = prev; }
+};
+#endif
+
+// A call of a function of the game by address, from host code that runs inside it.
+template <class T> using U64 = uint64_t;
+template <class... A> uint64_t gcall(uint64_t fn, A... a) {
+#ifdef __x86_64__
+    using F = DCP_SYSV uint64_t (*)(U64<A>...);
+    return reinterpret_cast<F>(fn)(a...);
+#else
+    return t_ctx ? rt::call_guest(t_ctx, fn, uint64_t(a)...) : 0;
+#endif
+}
 
 uint64_t gs() { return rd<uint64_t>(g_base + 0xc1dc40); }
 
@@ -61,7 +86,7 @@ uint64_t record(uint64_t g, int i) {
 
 bool local(uint64_t g, int i) {
     uint64_t rec = record(g, i);
-    return rec && reinterpret_cast<Fn1>(g_base + 0x271a0)(rec) & 1;
+    return rec && gcall(g_base + 0x271a0, rec) & 1;
 }
 
 bool in_stage(uint64_t g, uint64_t p) {
@@ -145,12 +170,23 @@ DCP_SYSV uint64_t rx_mute(uint32_t type_minus_1, uint64_t cmd) {
 
 using Fn2 = DCP_SYSV uint64_t (*)(uint64_t, uint64_t);
 using Fn4 = DCP_SYSV uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t);
+constexpr uint32_t kRx = 0x371a30;
+#ifdef __x86_64__
+void call_rx_orig(uint64_t cam, uint64_t cmd) { gcall(g_rx_orig, cam, cmd); }  // the relay's copy of the prologue
+#else
+thread_local bool t_rx_bypass = false;
+void call_rx_orig(uint64_t cam, uint64_t cmd) {  // the receive function once without its site hook
+    t_rx_bypass = true;
+    gcall(g_base + kRx, cam, cmd);
+    t_rx_bypass = false;
+}
+#endif
 DCP_SYSV uint64_t own_send(uint64_t cam, uint64_t cmd, uint64_t a2, uint64_t a3, uint64_t fn) {
-    if (!g_local || !gate(gs())) return reinterpret_cast<Fn4>(fn)(cam, cmd, a2, a3);
+    if (!g_local || !gate(gs())) return gcall(fn, cam, cmd, a2, a3);
     t_in_send = 1;
-    uint64_t r = reinterpret_cast<Fn4>(fn)(cam, cmd, a2, a3);
+    uint64_t r = gcall(fn, cam, cmd, a2, a3);
     t_in_send = 0;
-    reinterpret_cast<Fn2>(g_rx_orig)(cam, cmd), ++g_local_applied;
+    call_rx_orig(cam, cmd), ++g_local_applied;
     return r;
 }
 
@@ -224,15 +260,15 @@ int32_t stage_of(uint64_t g) {
     uint64_t act = rd<uint64_t>(g + 0x88);
     return act ? rd<int32_t>(act + 0xf0) : -1;
 }
-bool is_host() { return g_sys && reinterpret_cast<Fn1>(g_base + 0x26220)(rd<uint64_t>(g_sys + 0x80)) & 1; }
+bool is_host() { return g_sys && gcall(g_base + 0x26220, rd<uint64_t>(g_sys + 0x80)) & 1; }
 Rect view_rect(uint64_t vc) {
     return {int32_t(rd<float>(vc + 0x9c)), int32_t(rd<float>(vc + 0xa4)), int32_t(rd<float>(vc + 0xb0)),
             int32_t(rd<float>(vc + 0xb8))};
 }
 void group_range(uint64_t grp, int32_t& lo, int32_t& hi) {
     uint64_t vt = rd<uint64_t>(grp);
-    lo = rd<int32_t>(grp + 0x344) + int32_t(reinterpret_cast<Fn1>(rd<uint64_t>(vt + 0x2b0))(grp));
-    hi = rd<int32_t>(grp + 0x348) + int32_t(reinterpret_cast<Fn1>(rd<uint64_t>(vt + 0x2b0))(grp));
+    lo = rd<int32_t>(grp + 0x344) + int32_t(gcall(rd<uint64_t>(vt + 0x2b0), grp));
+    hi = rd<int32_t>(grp + 0x348) + int32_t(gcall(rd<uint64_t>(vt + 0x2b0), grp));
 }
 
 bool overlaps(uint64_t grp, const Rect& v) {
@@ -319,8 +355,8 @@ void apply_hold(int32_t l, int32_t r) {
     int32_t cl = on ? rd<int32_t>(vc + 0xcc) : -kNoLimit, cr = on ? rd<int32_t>(vc + 0xd0) : kNoLimit;
     l = l > cl ? l : cl, r = r < cr ? r : cr;
     if (l >= r) return;
-    reinterpret_cast<Fn2>(g_base + 0x113f0)(vc, uint64_t(uint32_t(l)));
-    reinterpret_cast<Fn2>(g_base + 0x11410)(vc, uint64_t(uint32_t(r)));
+    gcall(g_base + 0x113f0, vc, uint64_t(uint32_t(l)));
+    gcall(g_base + 0x11410, vc, uint64_t(uint32_t(r)));
 }
 
 void lock_log(const char* what, int32_t id, int8_t dir) {
@@ -351,7 +387,7 @@ void lock_tick(uint64_t g) {
         const uint64_t t = now_ms();
         for (auto it = g_groups.begin(); it != g_groups.end();) {
             bool running = rd<uint8_t>(it->obj + 0x5b) == 1;
-            int32_t alive = int32_t(reinterpret_cast<Fn1>(g_base + 0x464e30)(it->obj));
+            int32_t alive = int32_t(gcall(g_base + 0x464e30, it->obj));
             if (alive != it->alive) it->alive = alive, it->change_ms = t;
             bool holds = alive > 0 && t - it->change_ms < (running ? kStaleMs : kStaleDoneMs);
             if (!running && !it->done) it->done = true, lock_log(holds ? "done, enemies left" : "done", it->id, it->dir);
@@ -388,7 +424,7 @@ void lock_tick(uint64_t g) {
         if (host_runs(it->id)) { ++it; continue; }
         if (rd<uint8_t>(it->obj + 0x5b) == 1) {
             uint64_t vt = rd<uint64_t>(it->obj);
-            reinterpret_cast<Fn2>(rd<uint64_t>(vt + 0xa8))(it->obj, 2);
+            gcall(rd<uint64_t>(vt + 0xa8), it->obj, 2);
         }
         lock_log("ended by host", it->id, it->dir);
         it = g_groups.erase(it);
@@ -404,7 +440,7 @@ void room_tick(uint64_t g) {
         g_room_on = false;
     } else {
         uint64_t srv = rd<uint64_t>(g + 0x80);
-        bool host = srv && reinterpret_cast<Fn1>(g_base + 0x26220)(srv) & 1;
+        bool host = srv && gcall(g_base + 0x26220, srv) & 1;
         uint8_t b[12] = {};
         uint32_t magic = kMagic, type = 3;
         std::memcpy(b, &magic, 4), std::memcpy(b + 4, &type, 4);
@@ -431,10 +467,10 @@ void room_tick(uint64_t g) {
 }
 
 DCP_SYSV uint64_t group_in_view(uint64_t grp) {
-    uint64_t r = reinterpret_cast<Fn1>(g_base + 0x464b90)(grp) & 1;
+    uint64_t r = gcall(g_base + 0x464b90, grp) & 1;
     uint64_t g = gs();
     if (!g || !gate(g)) return r;
-    g_sys = reinterpret_cast<Fn1>(rd<uint64_t>(rd<uint64_t>(grp) + 0xd8))(grp);
+    g_sys = gcall(rd<uint64_t>(rd<uint64_t>(grp) + 0xd8), grp);
     rekey(g);
     int32_t id = rd<int32_t>(grp + 0x1f8);
     if (find_group(id)) return 1;
@@ -476,7 +512,7 @@ DCP_SYSV uint64_t group_in_view(uint64_t grp) {
 DCP_SYSV uint64_t group_count(uint64_t grp) {
     uint64_t g = gs();
     if (g && g_sys && gate(g) && !is_host() && host_runs(rd<int32_t>(grp + 0x1f8))) return 0x7fffffff;
-    return reinterpret_cast<Fn1>(g_base + 0x464e30)(grp);
+    return gcall(g_base + 0x464e30, grp);
 }
 
 DCP_SYSV void lease_left(uint64_t vc, int32_t v, uint64_t grp) {
@@ -484,10 +520,10 @@ DCP_SYSV void lease_left(uint64_t vc, int32_t v, uint64_t grp) {
     uint64_t g = gs();
     if (g && gate(g))
         if (const Group* x = find_group(rd<int32_t>(grp + 0x1f8))) g_lease_dir = x->dir;
-    reinterpret_cast<Fn2>(g_base + 0x113f0)(vc, uint64_t(uint32_t(g_lease_dir > 0 ? -kNoLimit : v)));
+    gcall(g_base + 0x113f0, vc, uint64_t(uint32_t(g_lease_dir > 0 ? -kNoLimit : v)));
 }
 DCP_SYSV void lease_right(uint64_t vc, int32_t v) {
-    reinterpret_cast<Fn2>(g_base + 0x11410)(vc, uint64_t(uint32_t(g_lease_dir < 0 ? kNoLimit : v)));
+    gcall(g_base + 0x11410, vc, uint64_t(uint32_t(g_lease_dir < 0 ? kNoLimit : v)));
     g_lease_dir = 0;
 }
 
@@ -505,6 +541,7 @@ bool off(const char* env) {
     return v && std::strcmp(v, "0") == 0;
 }
 
+#ifdef __x86_64__
 void write_code(uint8_t* at, const uint8_t* bytes, size_t n) {
     uint64_t lo = reinterpret_cast<uint64_t>(at) & ~0xfffull, hi = (reinterpret_cast<uint64_t>(at) + n + 0xfff) & ~0xfffull;
     mprotect(reinterpret_cast<void*>(lo), hi - lo, PROT_READ | PROT_WRITE | PROT_EXEC);
@@ -543,6 +580,8 @@ void put_rel32(uint8_t* bytes, const uint8_t* to, const uint8_t* next) {
     std::memcpy(bytes, &r, 4);
 }
 
+#endif  // __x86_64__ (relay machinery)
+
 struct CallSite {
     uint32_t site;
     uint8_t expect[5];
@@ -555,7 +594,6 @@ constexpr CallSite kCalls[] = {
     {0x372845, {0xe8, 0xb6, 0x21, 0xf5, 0xff}, false},
     {0x372b25, {0xe8, 0xd6, 0x1e, 0xf5, 0xff}, false},
 };
-constexpr uint32_t kRx = 0x371a30;
 constexpr uint8_t kRxBytes[] = {0x55, 0x48, 0x89, 0xe5, 0x48, 0x85, 0xf6};
 constexpr uint32_t kSends[] = {0x371d98, 0x371e3c, 0x371eeb, 0x371f51, 0x371fb8};
 constexpr uint8_t kSendBytes[] = {0xff, 0x90, 0x68, 0x01, 0x00, 0x00};
@@ -571,12 +609,25 @@ constexpr LockSite kInView{0x4648ea, 0xe8, 0x464b90}, kCount{0x464ae2, 0xe8, 0x4
 
 }
 
-void install(uint8_t* base) {
+void configure(uint8_t* base) {
     g_want = !off("DCP_OWN_CAMERA");
     g_base = reinterpret_cast<uint64_t>(base);
     g_filter = !off("DCP_OWN_CAMERA_FILTER"), g_rx = !off("DCP_OWN_CAMERA_RX"), g_local = !off("DCP_OWN_CAMERA_LOCAL");
     if (const char* n = std::getenv("DCP_OWN_CAMERA_LOG")) g_log_n = std::strtoull(n, nullptr, 10);
     if (const char* n = std::getenv("DCP_OWN_CAMERA_RXLOG")) g_rxlog = std::atoi(n);
+}
+
+void announce() {
+    g_lock_log = !off("DCP_OWN_CAMERA_LOCKLOG");
+    dcp::net::rudp::set_side_handler(&on_side);
+    std::fprintf(stderr, "own_camera: installed, %s when hosting (filter %d, net camera commands dropped %d, own commands "
+                 "applied locally %d, shared fight lock; online adventures only)\n", g_want ? "on" : "off", g_filter, g_rx,
+                 g_local);
+}
+
+#ifdef __x86_64__
+void install(uint8_t* base) {
+    configure(base);
     for (const CallSite& c : kCalls)
         if (std::memcmp(base + c.site, c.expect, 5)) {
             std::fprintf(stderr, "own_camera: unexpected bytes at eboot+0x%x; not installed\n", c.site);
@@ -668,11 +719,86 @@ void install(uint8_t* base) {
         put_rel32(op + 1, to, base + s.site + 5);
         write_code(base + s.site, op, 5);
     }
-    g_lock_log = !off("DCP_OWN_CAMERA_LOCKLOG");
-    dcp::net::rudp::set_side_handler(&on_side);
-    std::fprintf(stderr, "own_camera: installed, %s when hosting (filter %d, net camera commands dropped %d, own commands "
-                 "applied locally %d, shared fight lock; online adventures only)\n", g_want ? "on" : "off", g_filter, g_rx,
-                 g_local);
+    announce();
 }
+#else
+// Recompiled build: the same sites as host hooks (hooks/eboot_patches.txt `site` lines), all or nothing. A hook gets the guest
+// registers; those that stand in for a call (target skip) leave its result in rax, as the callee would.
+using rt::Ctx;
+rt::u64 site_cam_by_caller(Ctx* c) {  // the relay passes the caller of the enclosing function, [rbp+8], as a third argument
+    CtxScope s(c);
+    c->r[rt::RAX] = cam_player(c->r[rt::RDI], uint32_t(c->r[rt::RSI]), rd<uint64_t>(c->r[rt::RBP] + 8));
+    return 1;
+}
+rt::u64 site_cam_plain(Ctx* c) {
+    CtxScope s(c);
+    c->r[rt::RAX] = cam_player(c->r[rt::RDI], uint32_t(c->r[rt::RSI]), 0);
+    return 1;
+}
+rt::u64 site_rx(Ctx* c) {  // entry of the receive function (target ret): mutes the camera commands the room does not want
+    if (t_rx_bypass) return t_rx_bypass = false, 0;  // own_send calls the original once
+    CtxScope s(c);
+    const uint64_t cmd = c->r[rt::RSI];
+    if (!cmd) return 0;
+    const uint32_t type_minus_1 = uint32_t(int32_t(int16_t(rd<uint16_t>(cmd + 0x10)))) - 1;  // movsx eax,[rsi+0x10]; dec eax
+    if (type_minus_1 > 5 || !(rx_mute(type_minus_1, cmd) & 0xff)) return 0;
+    c->r[rt::RAX] = 1;
+    return 1;
+}
+rt::u64 site_send(Ctx* c) {  // call [rax+0x168]: the camera send function of the object in rax
+    CtxScope s(c);
+    const uint64_t fn = rd<uint64_t>(c->r[rt::RAX] + 0x168);
+    c->r[rt::RAX] = own_send(c->r[rt::RDI], c->r[rt::RSI], c->r[rt::RDX], c->r[rt::RCX], fn);
+    return 1;
+}
+rt::u64 site_in_view(Ctx* c) {
+    CtxScope s(c);
+    c->r[rt::RAX] = group_in_view(c->r[rt::RDI]);
+    return 1;
+}
+rt::u64 site_count(Ctx* c) {
+    CtxScope s(c);
+    c->r[rt::RAX] = group_count(c->r[rt::RDI]);
+    return 1;
+}
+rt::u64 site_lease_left(Ctx* c) {
+    CtxScope s(c);
+    lease_left(c->r[rt::RDI], int32_t(c->r[rt::RSI]), c->r[rt::R15]);  // the relay passes the group, r15, as the third argument
+    return 1;
+}
+rt::u64 site_lease_right(Ctx* c) {  // a tail jump (target ret): the callee's own ret returns from the enclosing function
+    CtxScope s(c);
+    lease_right(c->r[rt::RDI], int32_t(c->r[rt::RSI]));
+    return 1;
+}
+rt::u64 site_clamp(Ctx* c) {
+    CtxScope s(c);
+    c->r[rt::RAX] = lease_on(c->r[rt::RDI], c->r[rt::RBX]);  // the relay passes the actor, rbx, as the second argument
+    return 1;
+}
+
+void install(uint8_t* base) {
+    configure(base);
+    struct Site {
+        uint32_t off;
+        rt::SiteHook fn;
+    };
+    std::vector<Site> sites = {{kCalls[0].site, site_cam_by_caller}, {kCalls[1].site, site_cam_by_caller},
+                               {kCalls[2].site, site_cam_plain},     {kCalls[3].site, site_cam_plain},
+                               {kRx, site_rx},                       {kInView.site, site_in_view},
+                               {kCount.site, site_count},            {kLeaseL.site, site_lease_left},
+                               {kLeaseR.site, site_lease_right},     {kClampA.site, site_clamp},
+                               {kClampB.site, site_clamp}};
+    for (uint32_t a : kSends) sites.push_back({a, site_send});
+    bool ok = true;
+    for (const Site& s : sites) ok = rt::set_site_hook("eboot", s.off, s.fn) && ok;
+    if (!ok) {
+        for (const Site& s : sites) rt::set_site_hook("eboot", s.off, nullptr);
+        std::fprintf(stderr, "own_camera: the recompiled eboot has no site hooks for it (dcp_recompile --patches hooks/eboot_patches.txt); not installed\n");
+        return;
+    }
+    announce();
+}
+#endif
 
 }

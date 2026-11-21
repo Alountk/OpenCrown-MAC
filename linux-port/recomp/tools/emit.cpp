@@ -108,6 +108,7 @@ std::map<uint64_t, SiteHook> parse_sites(const std::string& text) {
         SiteHook h;
         h.expect = parse_hex_bytes(expect, line);
         if (target == "ret") h.target = kSiteRet;
+        else if (target == "skip") h.target = kSiteSkip;
         else if (target != "-") {
             h.target = std::strtoull(target.c_str(), &end, 16);
             if (end == target.c_str() || *end || h.target == kSiteNoTarget) throw std::runtime_error("site list: bad target in: " + line);

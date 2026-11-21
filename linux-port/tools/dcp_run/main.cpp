@@ -544,10 +544,7 @@ int main(int argc, char** argv) {
         install_probes(reinterpret_cast<uint64_t>(eb->img.base));
         dcp::skip_offers::install(eb->img.base);  // story / tutorial skip questions for every new hero (skip_offers.h)
         dcp::confirm_button::install(eb->img.base);  // DCP_CONFIRM=circle: Japanese button layout (confirm_button.h)
-#ifdef __x86_64__
-        // own_camera still patches x86 bytes and relays; with recompiled code it is disabled (online only, not ported yet).
-        dcp::own_camera::install(eb->img.base);   // separate cameras online
-#endif
+        dcp::own_camera::install(eb->img.base);   // separate cameras online (x86: byte relays; recompiled: site hooks)
 #ifndef DCP_HAVE_RENDER
         if (render) throw std::runtime_error("--render needs a build with -DDCP_RENDER=ON (the default)");
 #else

@@ -284,6 +284,13 @@ static void test_site_hooks() {
     CHECK(t.find("dcp::rt::SiteHook dcp_site_eboot_1003 = nullptr;") != std::string::npos);
     CHECK(t.find("register_site_slot(\"eboot\", 0x1003u, &dcp_site_eboot_1003);") != std::string::npos);
     CHECK(lift_function_table(fns, "eboot").find("dcp_site") == std::string::npos);
+    // kSiteSkip: the hook did the instruction's work, a non-zero result jumps over the instruction (and runs nothing else of it).
+    const std::string k = lift_function(fn, fns, "eboot", false, {}, {}, SiteMap{{0x1005, kSiteSkip}}).code;
+    const size_t k0 = k.find("if (dcp_site_eboot_1005) {"), kgo = k.find("goto S_1005;", k0), kl = k.find("S_1005:;");
+    CHECK(k0 != std::string::npos && kgo != std::string::npos && kl != std::string::npos && kgo < kl);
+    const size_t ins = k.find("0xaull", kgo);  // mov eax,10 sits between the jump and the label
+    CHECK(ins != std::string::npos && ins < kl);
+    CHECK(lift_function(fn, fns, "eboot", false, {}, {}, SiteMap{{0x1003, 0x100b}}).code.find("S_1003") == std::string::npos);  // other targets: no label
     // A target that does not start a basic block of the function cannot be a label: refused.
     bool threw = false;
     try { lift_function(fn, fns, "eboot", false, {}, {}, SiteMap{{0x1003, 0x1007}}); } catch (const std::runtime_error&) { threw = true; }
