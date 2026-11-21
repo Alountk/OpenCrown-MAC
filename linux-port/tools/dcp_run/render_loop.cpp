@@ -227,6 +227,10 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
         if (o.input) {
             o.input->set_blocked(ime.blocking() || chat.blocking());
             o.input->update(win);
+            if (o.input->quit_requested()) {
+                std::fprintf(stderr, "render: quit combo held (Select + Start)\n");
+                finish(0);
+            }
         }
         if (o.game_done && o.game_done->load()) finish(0);  // the game thread returned (macOS has no non-blocking pthread join)
         auto f = dcp::render::take_frame(locked ? 20 : 50);
