@@ -1814,7 +1814,13 @@ int main(int argc, char** argv) {
     UpdateJob upd;
     const std::string appimage = appimage_path();
     if (!appimage.empty() && !selftest) ::unlink((appimage + ".part").c_str());  // leftover of an interrupted update
-    if (set.check_updates && !selftest) upd.check();
+#ifdef __APPLE__
+    constexpr bool kMac = true;
+#else
+    constexpr bool kMac = false;
+#endif
+    const bool updater = dcp::launcher::updater_supported(kMac);
+    if (updater && set.check_updates && !selftest) upd.check();
     std::string relaunch_error;
     bool relaunched = false;
     bool ask_saves = !set.saves_chosen && !selftest;  // first start: where should saves go?
@@ -2009,6 +2015,7 @@ int main(int argc, char** argv) {
             if (strcasecmp(first_tab.c_str(), "Settings") == 0) page = 2;
             if (in_settings(page)) settings_tab = page, settings_select = page;
         }
+        if (!updater && page == 6) page = 0;  // no Update page where there is no updater (--tab Update, --updated)
         // Update state snapshot for this frame.
         bool u_running, u_downloading, u_checked, u_installed;
         dcp::net::update::Result u_res;
@@ -2068,12 +2075,13 @@ int main(int argc, char** argv) {
             // Update entry (same style as the navigation above), its state line, then the version, pinned to the
             // bottom-left of the sidebar.
             if (font_nav) ImGui::PushFont(font_nav);
-            const float upd_h = ImGui::GetTextLineHeight() + 12 * scale;
+            const float upd_h = updater ? ImGui::GetTextLineHeight() + 12 * scale : 0.0f;
             if (font_nav) ImGui::PopFont();
             const float line_h = ImGui::GetTextLineHeight(), gap = ImGui::GetStyle().ItemSpacing.y;
-            const float upd_y = ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y - 2 * line_h - 2 * gap - upd_h;
+            const float upd_y = ImGui::GetWindowHeight() - ImGui::GetStyle().WindowPadding.y -
+                                (updater ? 2 : 1) * line_h - (updater ? 2 : 1) * gap - upd_h;
             if (upd_y > ImGui::GetCursorPosY()) ImGui::SetCursorPosY(upd_y);
-            {
+            if (updater) {
                 std::string state;
                 ImVec4 col = kDim;
                 bool avail = false;

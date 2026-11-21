@@ -78,6 +78,10 @@ inline std::vector<std::string> game_command(bool mac, const std::string& exe_di
     return cmd;
 }
 
+// The self-updater (net/update.h) follows the upstream Linux releases and swaps an AppImage: it has nothing to offer on macOS, so there the
+// launcher makes no start-up check, and shows no Update entry.
+inline bool updater_supported(bool mac) { return !mac; }
+
 // What the launcher says while play-mac.sh is working, from the last lines of its log: the latest phase marker wins. Empty when the
 // log has no marker (plain dcp_run) or the script has already started the game.
 inline std::string play_phase(const std::vector<std::string>& lines) {

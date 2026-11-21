@@ -73,6 +73,9 @@ int main() {
     CHECK(play_phase({"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10", "[12/338] Building CXX object y"}) ==
           "Building the game for this Mac...");
     CHECK(play_phase({"+ cmake --build /w/run --target dcp_run -j10", "+ /w/run/dcp_run /d/eboot.bin --window --renderer gl", "eboot: base 0x1"}).empty());  // running
+    // The self-updater follows the upstream Linux releases (an AppImage): it exists only off macOS.
+    CHECK(dcp::launcher::updater_supported(false));
+    CHECK(!dcp::launcher::updater_supported(true));
     if (!g_fail) std::puts("launcher platform: all tests passed");
     return g_fail ? 1 : 0;
 }
