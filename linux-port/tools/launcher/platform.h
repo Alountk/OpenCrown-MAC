@@ -30,6 +30,19 @@ inline void keep_only_stdio(posix_spawn_file_actions_t* fa, posix_spawnattr_t* a
 #endif
 }
 
+// macOS: the Play button's child (play-mac.sh) starts builds and the game itself, so it leads a process group of its own and Stop
+// signals that whole group. Elsewhere the child (dcp_run) is the game and stays in the launcher's group.
+inline void own_process_group(posix_spawnattr_t* attr, bool mac) {
+    if (!mac) return;
+    short flags = 0;
+    posix_spawnattr_getflags(attr, &flags);
+    posix_spawnattr_setflags(attr, short(flags | POSIX_SPAWN_SETPGROUP));
+    posix_spawnattr_setpgroup(attr, 0);
+}
+
+// What to pass to kill() to stop the child `pid` started with own_process_group(attr, mac).
+inline pid_t stop_target(pid_t pid, bool mac) { return mac ? -pid : pid; }
+
 // The program that opens a folder, file or URL in the desktop's default application.
 inline const char* opener_program() {
 #ifdef __APPLE__
@@ -81,6 +94,19 @@ inline std::vector<std::string> game_command(bool mac, const std::string& exe_di
 // The self-updater (net/update.h) follows the upstream Linux releases and swaps an AppImage: it has nothing to offer on macOS, so there the
 // launcher makes no start-up check, and shows no Update entry.
 inline bool updater_supported(bool mac) { return !mac; }
+
+// The lines of play-mac.sh's own output that mark a step ("+ command" echoes and "play-mac:" messages). A build floods the log with
+// compiler progress lines, which would push these out of any fixed-size tail.
+inline bool is_phase_marker(const std::string& line) { return line.rfind("+ ", 0) == 0 || line.rfind("play-mac:", 0) == 0; }
+
+// The last (at most 40) marker lines of a log, in order.
+inline std::vector<std::string> phase_markers(const std::vector<std::string>& lines) {
+    std::vector<std::string> out;
+    for (const std::string& l : lines)
+        if (is_phase_marker(l)) out.push_back(l);
+    if (out.size() > 40) out.erase(out.begin(), out.end() - 40);
+    return out;
+}
 
 // What the launcher says while play-mac.sh is working, from the last lines of its log: the latest phase marker wins. Empty when the
 // log has no marker (plain dcp_run) or the script has already started the game.
