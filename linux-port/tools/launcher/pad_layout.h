@@ -74,6 +74,21 @@ inline std::vector<float> spread(const std::vector<float>& want, float gap, floa
     return out;
 }
 
+// Controller setup (pad_mapping.h): the button of the drawing each SDL mapping step asks the user to press; nullptr when unknown.
+// The stick steps point at the direction they ask for.
+inline const char* action_for_step(const std::string& target) {
+    static const std::vector<std::pair<const char*, const char*>> m = {
+        {"a", "cross"},         {"b", "circle"},       {"x", "square"},       {"y", "triangle"},
+        {"leftshoulder", "l1"}, {"rightshoulder", "r1"}, {"lefttrigger", "l2"}, {"righttrigger", "r2"},
+        {"back", "touchpad"},   {"start", "options"},  {"leftstick", "l3"},  {"rightstick", "r3"},
+        {"dpup", "dpad_up"},    {"dpdown", "dpad_down"}, {"dpleft", "dpad_left"}, {"dpright", "dpad_right"},
+        {"leftx", "move_right"}, {"lefty", "move_down"}, {"rightx", "look_right"}, {"righty", "look_down"},
+    };
+    for (const auto& [step, action] : m)
+        if (target == step) return action;
+    return nullptr;
+}
+
 // input.ini bindings that are not a button of the controller: they stay in the list view.
 inline const std::vector<const char*>& not_on_controller() {
     static const std::vector<const char*> n = {"town_map", "fairy", "fairy_toggle", "fairy_tap", "pointer_tap", "chat"};

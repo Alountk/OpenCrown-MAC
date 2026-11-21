@@ -1024,6 +1024,36 @@ void draw_notes(const std::vector<dcp::net::update::NoteLine>& lines, ImFont* fo
 template <class Act>
 void draw_friend_lists(const dcp::net::FriendsState& L, bool busy, Act act, std::string& confirm_remove, float scale);
 
+// The two controller drawings, decoded on first use (the GL context exists by then).
+const Tex& pad_tex(dcp::padlayout::View v) {
+    static const Tex front = load_texture_mem(kPad_front_png, kPad_front_png_size);
+    static const Tex top = load_texture_mem(kPad_top_png, kPad_top_png_size);
+    return v == dcp::padlayout::View::Front ? front : top;
+}
+
+// A button of the drawing coloured: `o` is where the drawing starts on screen, `k` its scale.
+void draw_zone_highlight(ImDrawList* dl, ImVec2 o, float k, const dcp::padlayout::Zone& z) {
+    const ImVec2 c(o.x + z.hx * k, o.y + z.hy * k), h(z.rx * k, z.ry * k);
+    dl->AddRectFilled(ImVec2(c.x - h.x, c.y - h.y), ImVec2(c.x + h.x, c.y + h.y), IM_COL32(250, 170, 60, 110), z.rd * k);
+    dl->AddRect(ImVec2(c.x - h.x, c.y - h.y), ImVec2(c.x + h.x, c.y + h.y), IM_COL32(255, 200, 100, 255), z.rd * k, ImDrawFlags_None, 2.0f);
+}
+
+// Controller setup: the drawing that has `action`'s button (front or shoulders), fitted into w x h and centred, the button coloured.
+void draw_pad_picture(const char* action, float w, float h) {
+    using namespace dcp::padlayout;
+    const Zone* zone = nullptr;
+    for (const Zone& z : zones())
+        if (action && std::string(z.action) == action) zone = &z;
+    const View view = zone ? zone->view : View::Front;
+    const float iw = view == View::Front ? kFrontW : kTopW, ih = view == View::Front ? kFrontH : kTopH;
+    const float k = std::min(w / iw, h / ih);
+    const ImVec2 p = ImGui::GetCursorScreenPos(), o(p.x + (w - iw * k) * 0.5f, p.y + (h - ih * k) * 0.5f);
+    const Tex& img = pad_tex(view);
+    if (img.id) ImGui::GetWindowDrawList()->AddImage(tex_id(img), o, ImVec2(o.x + iw * k, o.y + ih * k));
+    if (zone) draw_zone_highlight(ImGui::GetWindowDrawList(), o, k, *zone);
+    ImGui::Dummy(ImVec2(w, h));
+}
+
 // Controls page, controller view: one of the DualShock 4 line drawings (assets/: the front view for the buttons, the top view for the
 // shoulder buttons) with, in a column to each side of the window, a clickable label per button (its name and the key bound to it,
 // pad_layout.h) joined to the button by a line. The button is coloured while its label is hovered. `conflicted(binding)` marks a key
@@ -1031,9 +1061,7 @@ void draw_friend_lists(const dcp::net::FriendsState& L, bool busy, Act act, std:
 template <class Conflict>
 int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, dcp::padlayout::View view, const Conflict& conflicted) {
     using namespace dcp::padlayout;
-    static const Tex front_img = load_texture_mem(kPad_front_png, kPad_front_png_size);  // first use: the GL context exists by then
-    static const Tex top_img = load_texture_mem(kPad_top_png, kPad_top_png_size);
-    const Tex& img = view == View::Front ? front_img : top_img;
+    const Tex& img = pad_tex(view);
     const float iw = view == View::Front ? kFrontW : kTopW, ih = view == View::Front ? kFrontH : kTopH;
     const float lh = ImGui::GetTextLineHeight();
 
@@ -1102,9 +1130,7 @@ int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, d
             const bool hot = ImGui::IsItemHovered(), bad = conflicted(b);
             ImGui::PopID();
             if (hot || cap) {  // the button itself, coloured
-                const ImVec2 hc(o.x + it.z->hx * k, o.y + it.z->hy * k), hs(it.z->rx * k, it.z->ry * k);
-                dl->AddRectFilled(ImVec2(hc.x - hs.x, hc.y - hs.y), ImVec2(hc.x + hs.x, hc.y + hs.y), IM_COL32(250, 170, 60, 110), it.z->rd * k);
-                dl->AddRect(ImVec2(hc.x - hs.x, hc.y - hs.y), ImVec2(hc.x + hs.x, hc.y + hs.y), IM_COL32(255, 200, 100, 255), it.z->rd * k, ImDrawFlags_None, 2.0f);
+                draw_zone_highlight(dl, o, k, *it.z);
             }
             const ImVec2 from(left ? e.x : a.x, ys[n]);
             dl->AddLine(from, anchor, hot || cap ? line : line_dim, hot || cap ? 2.0f : 1.0f);
@@ -2320,6 +2346,19 @@ int main(int argc, char** argv) {
                 std::map<std::string, std::vector<std::string>> users;
                 for (const Binding& b : ctl.binds)
                     if (!b.value.empty() && b.action != "fairy_tap" && b.action != "pointer_tap") users[key_of(b.value)].push_back(b.action);
+                // First thing on the page, on its own row: the gamepad (as opposed to the keyboard bindings below).
+                const float top_y = ImGui::GetCursorPosY();
+                ImGui::AlignTextToFramePadding();
+                if (ImGui::Button("Set up a gamepad...")) {
+                    reset_pad_setups = false;
+                    pad_setup.open(user + "/gamepad_mappings.txt");
+                }
+                ImGui::SameLine();
+                ImGui::TextColored(kDim, "Buttons of your controller doing the wrong thing in the game? Map them here.");
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+                const float top_row_h = ImGui::GetCursorPosY() - top_y;  // the drawings do not shrink for this row: the page scrolls
                 ImGui::TextColored(kDim, "Click a binding, then press a key or mouse button. Esc cancels, "
                                          "Backspace/Delete clears.");
                 static bool pad_view = true;  // controller drawing (default) or the full list
@@ -2331,9 +2370,9 @@ int main(int argc, char** argv) {
                 if (pad_view) {
                     // Both drawings one under the other, each as large as the page allows; the page's own scrolling reaches the second.
                     auto conflict = [&](const Binding& b) { return !b.value.empty() && users[key_of(b.value)].size() > 1; };
-                    int hit = draw_pad_view(ctl.binds, capture, table_h, dcp::padlayout::View::Front, conflict);
+                    int hit = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Front, conflict);
                     ImGui::Dummy(ImVec2(0, 12 * scale));
-                    const int hit2 = draw_pad_view(ctl.binds, capture, table_h, dcp::padlayout::View::Top, conflict);
+                    const int hit2 = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Top, conflict);
                     if (hit2 >= 0) hit = hit2;
                     if (hit >= 0) capture = hit;
                 } else if (ImGui::BeginTable("##binds", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
@@ -2415,13 +2454,9 @@ int main(int argc, char** argv) {
                 }
                 ImGui::SameLine();
                 ImGui::TextColored(kDim, "%s", status.c_str());
-                if (ImGui::Button("Controller setup...")) {
-                    reset_pad_setups = false;
-                    pad_setup.open(user + "/gamepad_mappings.txt");
-                }
-                ImGui::SameLine();
-                ImGui::TextColored(kDim, "For controllers whose buttons do the wrong thing in the game.");
-                pad_setup.draw(scale, kDim);
+                pad_setup.draw(scale, kDim, [&](const char* target, float w, float h) {
+                    draw_pad_picture(dcp::padlayout::action_for_step(target), w, h);
+                });
             } else if (t == 2) {
                 int mode = set.fullscreen ? 1 : 0;
                 ImGui::RadioButton("Windowed", &mode, 0);
