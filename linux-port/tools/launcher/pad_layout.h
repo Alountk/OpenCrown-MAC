@@ -1,5 +1,5 @@
-// Controls page, controller view: where each input.ini action sits on the drawn controller (the front view and the top view, the PNGs
-// in assets/). Pure data and text helpers (no ImGui), so a test keeps them in step with the actions of input.ini.
+// Controls page, controller view: where each input.ini action sits on the drawn controller (the front view and the top view of the PlayStation or
+// the Xbox pad, the PNGs in assets/). Pure data and text helpers (no ImGui), so a test keeps them in step with the actions of input.ini.
 #pragma once
 #include <algorithm>
 #include <numeric>
@@ -9,6 +9,7 @@
 namespace dcp::padlayout {
 
 enum class View { Front, Top };
+enum class Kind { Ps4, Xbox };  // the controller drawn: the one connected (a DualShock / DualSense, or an Xbox pad), PlayStation's by default
 
 struct Zone {
     const char* action;  // input.ini binding name
@@ -18,11 +19,22 @@ struct Zone {
     float hx, hy, rx, ry, rd;  // the button's area, coloured while its label is hovered: centre, half sizes, corner radius
 };
 
-// The two views are line drawings (assets/pad_front.png, pad_top.png). Zones are placed in image pixels; the frames are the image sizes.
-constexpr float kFrontW = 1145, kFrontH = 717, kTopW = 1195, kTopH = 487;
+// Each controller has two views, line drawings (assets/): the front for the buttons, the top for the shoulder buttons and triggers.
+// Zones are placed in image pixels; the frame is the image size.
+struct Frame {
+    float w, h;
+};
+inline Frame frame(Kind k, View v) {
+    if (k == Kind::Xbox) return v == View::Front ? Frame{645, 435} : Frame{666, 294};
+    return v == View::Front ? Frame{1145, 717} : Frame{1195, 487};
+}
+inline const char* image_file(Kind k, View v) {
+    if (k == Kind::Xbox) return v == View::Front ? "xbox_front.png" : "xbox_top.png";
+    return v == View::Front ? "ps4_front.png" : "ps4_top.png";
+}
 
-inline const std::vector<Zone>& zones() {
-    static const std::vector<Zone> z = {
+inline const std::vector<Zone>& zones(Kind kind) {
+    static const std::vector<Zone> ps4 = {
         // front view
         {"dpad_up", "D-pad up", View::Front, 233, 147, 233, 147, 30, 38, 14},
         {"dpad_left", "D-pad left", View::Front, 175, 210, 175, 210, 38, 30, 14},
@@ -48,11 +60,38 @@ inline const std::vector<Zone>& zones() {
         {"l2", "L2", View::Top, 214, 110, 218, 93, 68, 62, 40},   {"l1", "L1", View::Top, 211, 221, 209, 233, 85, 42, 30},
         {"r2", "R2", View::Top, 979, 110, 977, 93, 68, 62, 40},   {"r1", "R1", View::Top, 979, 221, 986, 233, 85, 42, 30},
     };
-    return z;
+    // The Xbox pad has no touchpad: its View button is the one SDL calls "back", the one the touchpad click stands for.
+    static const std::vector<Zone> xbox = {
+        {"dpad_up", "D-pad up", View::Front, 244, 198, 244, 198, 13, 17, 6},
+        {"dpad_left", "D-pad left", View::Front, 212, 230, 212, 230, 17, 13, 6},
+        {"dpad_right", "D-pad right", View::Front, 276, 230, 276, 230, 17, 13, 6},
+        {"dpad_down", "D-pad down", View::Front, 244, 262, 244, 262, 13, 17, 6},
+        {"triangle", "Y", View::Front, 491, 85, 491, 85, 24, 24, 24},
+        {"square", "X", View::Front, 446, 128, 446, 128, 24, 24, 24},
+        {"circle", "B", View::Front, 537, 128, 537, 128, 24, 24, 24},
+        {"cross", "A", View::Front, 491, 170, 491, 170, 24, 24, 24},
+        {"touchpad", "View", View::Front, 277, 128, 277, 128, 15, 15, 15},
+        {"options", "Menu", View::Front, 369, 128, 369, 128, 15, 15, 15},
+        {"move_up", "Move up", View::Front, 164, 95, 164, 95, 12, 12, 12},
+        {"move_left", "Move left", View::Front, 132, 127, 132, 127, 12, 12, 12},
+        {"l3", "LS (press)", View::Front, 164, 127, 164, 127, 26, 26, 26},
+        {"move_right", "Move right", View::Front, 196, 127, 196, 127, 12, 12, 12},
+        {"move_down", "Move down", View::Front, 164, 159, 164, 159, 12, 12, 12},
+        {"look_up", "Look up", View::Front, 399, 183, 399, 183, 12, 12, 12},
+        {"look_left", "Look left", View::Front, 367, 215, 367, 215, 12, 12, 12},
+        {"r3", "RS (press)", View::Front, 399, 215, 399, 215, 26, 26, 26},
+        {"look_right", "Look right", View::Front, 431, 215, 431, 215, 12, 12, 12},
+        {"look_down", "Look down", View::Front, 399, 247, 399, 247, 12, 12, 12},
+        // top view, drawn turned 180 degrees (as seen from behind): on each side the big rear panel is the trigger (LT / RT) and the
+        // curved band under it the bumper (LB / RB); the two tabs sticking out are the thumbsticks. L is on the left, as the player sees it.
+        {"l2", "LT", View::Top, 142, 113, 142, 113, 47, 50, 24},   {"l1", "LB", View::Top, 155, 196, 155, 196, 62, 30, 24},
+        {"r2", "RT", View::Top, 524, 113, 524, 113, 47, 50, 24},   {"r1", "RB", View::Top, 511, 196, 511, 196, 62, 30, 24},
+    };
+    return kind == Kind::Xbox ? xbox : ps4;
 }
 
 // Which column a zone's label goes in: left of its image, or right of it.
-inline bool label_on_left(const Zone& z) { return z.cx < (z.view == View::Front ? kFrontW : kTopW) * 0.5f; }
+inline bool label_on_left(Kind k, const Zone& z) { return z.cx < frame(k, z.view).w * 0.5f; }
 
 
 // Vertical positions for a column of labels: `want` are the ideal ones (the buttons' heights), the result (same order) keeps their
