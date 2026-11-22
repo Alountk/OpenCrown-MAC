@@ -1064,9 +1064,11 @@ void draw_pad_picture(const char* action, float w, float h) {
 // Controls page, controller view: one of the line drawings of the connected controller, PlayStation's or Xbox's (assets/: the front view for the buttons, the top view for the
 // shoulder buttons) with, in a column to each side of the window, a clickable label per button (its name and the key bound to it,
 // pad_layout.h) joined to the button by a line. The button is coloured while its label is hovered. `conflicted(binding)` marks a key
-// used by two actions. Returns the index of the clicked binding, or -1.
+// used by two actions. `match_w` (when > 0) is the width on screen the drawing must not exceed, so the top view is no wider than the
+// front one; `drawn_w` receives the width the drawing got. Returns the index of the clicked binding, or -1.
 template <class Conflict>
-int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, dcp::padlayout::View view, const Conflict& conflicted) {
+int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, dcp::padlayout::View view, const Conflict& conflicted,
+                  float match_w = 0, float* drawn_w = nullptr) {
     using namespace dcp::padlayout;
     const Tex& img = pad_tex(view);
     const float iw = frame(g_pad_kind, view).w, ih = frame(g_pad_kind, view).h;
@@ -1108,7 +1110,9 @@ int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, d
         }
         k_hi = k_lo;
     }
-    const float k = std::max(k_lo, k_hi);
+    float k = std::max(k_lo, k_hi);
+    if (match_w > 0) k = std::min(k, match_w / iw);
+    if (drawn_w) *drawn_w = iw * k;
     const float block_h = std::max(ih * k, need);
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const ImVec2 o(start.x + (avail.x - iw * k) * 0.5f, start.y + (block_h - ih * k) * 0.5f);  // the drawing, centred in its block
@@ -2364,13 +2368,13 @@ int main(int argc, char** argv) {
                     if (!b.value.empty() && b.action != "fairy_tap" && b.action != "pointer_tap") users[key_of(b.value)].push_back(b.action);
                 // First thing on the page, on its own row: the gamepad (as opposed to the keyboard bindings below).
                 const float top_y = ImGui::GetCursorPosY();
-                ImGui::AlignTextToFramePadding();
+                ImGui::PushTextWrapPos(0);
+                ImGui::TextColored(kDim, "PlayStation and Xbox controllers work out of the box. Use this for any other controller, or if your buttons do the wrong thing.");
+                ImGui::PopTextWrapPos();
                 if (ImGui::Button("Set up a gamepad...")) {
                     reset_pad_setups = false;
                     pad_setup.open(user + "/gamepad_mappings.txt");
                 }
-                ImGui::SameLine();
-                ImGui::TextColored(kDim, "Buttons of your controller doing the wrong thing in the game? Map them here.");
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
@@ -2386,9 +2390,11 @@ int main(int argc, char** argv) {
                 if (pad_view) {
                     // Both drawings one under the other, each as large as the page allows; the page's own scrolling reaches the second.
                     auto conflict = [&](const Binding& b) { return !b.value.empty() && users[key_of(b.value)].size() > 1; };
-                    int hit = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Front, conflict);
+                    float front_w = 0;
+                    int hit = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Front, conflict, 0, &front_w);
                     ImGui::Dummy(ImVec2(0, 12 * scale));
-                    const int hit2 = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Top, conflict);
+                    // The top view is drawn as wide as the front one (the controller is the same width seen from above).
+                    const int hit2 = draw_pad_view(ctl.binds, capture, table_h + top_row_h, dcp::padlayout::View::Top, conflict, front_w);
                     if (hit2 >= 0) hit = hit2;
                     if (hit >= 0) capture = hit;
                 } else if (ImGui::BeginTable("##binds", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
