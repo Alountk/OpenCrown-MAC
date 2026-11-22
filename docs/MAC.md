@@ -31,7 +31,7 @@ The first run recompiles your dump and builds the game (a few minutes); later ru
 
 ```sh
 cd linux-port
-cmake -S . -B build
+cmake -S . -B build -DDCP_RECOMPILED=ON
 cmake --build build --target opencrown_launcher
 ./build/opencrown-launcher
 ```
