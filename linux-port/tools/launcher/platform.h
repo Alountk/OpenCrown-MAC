@@ -95,6 +95,13 @@ inline std::vector<std::string> game_command(bool mac, const std::string& exe_di
 // launcher makes no start-up check, and shows no Update entry.
 inline bool updater_supported(bool mac) { return !mac; }
 
+// The SDL GPU renderer only loads SPIR-V shaders, so on macOS the game always draws with OpenGL: the renderer choice, FSR 1 and sharpening
+// (SDL GPU only) do nothing there and are not shown.
+inline bool gpu_renderer_options(bool mac) { return !mac; }
+
+// Touch screen, Steam Deck trackpads and "mouse buttons press game buttons" (a Steam Deck setting) are for Linux handhelds, not a Mac.
+inline bool deck_touch_options(bool mac) { return !mac; }
+
 // The lines of play-mac.sh's own output that mark a step ("+ command" echoes and "play-mac:" messages). A build floods the log with
 // compiler progress lines, which would push these out of any fixed-size tail.
 inline bool is_phase_marker(const std::string& line) { return line.rfind("+ ", 0) == 0 || line.rfind("play-mac:", 0) == 0; }

@@ -112,6 +112,10 @@ int main() {
     // The self-updater follows the upstream Linux releases (an AppImage): it exists only off macOS.
     CHECK(dcp::launcher::updater_supported(false));
     CHECK(!dcp::launcher::updater_supported(true));
+    // The SDL GPU renderer only loads SPIR-V shaders, so on macOS the game always draws with OpenGL: the options that need SDL GPU
+    // (renderer choice, FSR 1, sharpening) are left out there. The Steam Deck / touch-screen settings are Linux only too.
+    CHECK(dcp::launcher::gpu_renderer_options(false) && !dcp::launcher::gpu_renderer_options(true));
+    CHECK(dcp::launcher::deck_touch_options(false) && !dcp::launcher::deck_touch_options(true));
     // A long build floods the log with ninja progress lines: only the script's own marker lines say which step it is on.
     {
         std::vector<std::string> log = {"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10"};
