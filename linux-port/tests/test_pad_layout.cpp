@@ -43,48 +43,74 @@ int main() {
     }
     CHECK(bindings.size() > 20);
 
-    std::set<std::string> drawn;
-    for (const Zone& z : zones()) {
-        CHECK(drawn.insert(z.action).second);   // one zone per action
-        CHECK(bindings.count(z.action) == 1);   // and it is a real binding
-        const float w = z.view == View::Front ? kFrontW : kTopW, h = z.view == View::Front ? kFrontH : kTopH;
-        CHECK(z.cx > 0 && z.cy > 0 && z.cx < w && z.cy < h);
-        CHECK(z.label && z.label[0]);
-        // The coloured area is a real shape inside the image, and the line ends on it.
-        CHECK(z.rx > 5 && z.ry > 5 && z.rd > 0 && z.rd <= std::fmin(z.rx, z.ry) + 1e-3f);
-        CHECK(z.hx - z.rx >= 0 && z.hx + z.rx <= w && z.hy - z.ry >= 0 && z.hy + z.ry <= h);
-        CHECK(std::fabs(z.cx - z.hx) <= z.rx + 1e-3f && std::fabs(z.cy - z.hy) <= z.ry + 1e-3f);
-    }
-    // Every binding is either on the controller or listed as one that is not a controller button.
-    for (const std::string& b : bindings) {
-        bool listed = false;
-        for (const char* n : not_on_controller()) listed = listed || b == n;
-        CHECK(drawn.count(b) != (listed ? 1u : 0u));
-    }
-    // Zones are the ends of leader lines: two anchors in one view are never on the same spot.
-    const auto& zs = zones();
-    for (size_t i = 0; i < zs.size(); ++i)
-        for (size_t j = i + 1; j < zs.size(); ++j) {
-            if (zs[i].view != zs[j].view) continue;
-            const float dx = std::fabs(zs[i].cx - zs[j].cx), dy = std::fabs(zs[i].cy - zs[j].cy);
-            const bool apart = dx >= 50 || dy >= 50;
-            if (!apart) std::printf("too close: %s / %s\n", zs[i].action, zs[j].action);
-            CHECK(apart);
+    for (const Kind kind : {Kind::Ps4, Kind::Xbox}) {
+        const auto& zs = zones(kind);
+        std::set<std::string> drawn;
+        for (const Zone& z : zs) {
+            CHECK(drawn.insert(z.action).second);   // one zone per action
+            CHECK(bindings.count(z.action) == 1);   // and it is a real binding
+            const Frame f = frame(kind, z.view);
+            CHECK(z.cx > 0 && z.cy > 0 && z.cx < f.w && z.cy < f.h);
+            CHECK(z.label && z.label[0]);
+            // The coloured area is a real shape inside the image, and the line ends on it.
+            CHECK(z.rx > 5 && z.ry > 5 && z.rd > 0 && z.rd <= std::fmin(z.rx, z.ry) + 1e-3f);
+            CHECK(z.hx - z.rx >= 0 && z.hx + z.rx <= f.w && z.hy - z.ry >= 0 && z.hy + z.ry <= f.h);
+            CHECK(std::fabs(z.cx - z.hx) <= z.rx + 1e-3f && std::fabs(z.cy - z.hy) <= z.ry + 1e-3f);
+        }
+        // Every binding is either on the controller or listed as one that is not a controller button.
+        for (const std::string& b : bindings) {
+            bool listed = false;
+            for (const char* n : not_on_controller()) listed = listed || b == n;
+            CHECK(drawn.count(b) != (listed ? 1u : 0u));
+        }
+        // Zones are the ends of leader lines: two anchors in one view are never on the same spot (4.3% of the image width apart).
+        for (size_t i = 0; i < zs.size(); ++i)
+            for (size_t j = i + 1; j < zs.size(); ++j) {
+                if (zs[i].view != zs[j].view) continue;
+                const float dx = std::fabs(zs[i].cx - zs[j].cx), dy = std::fabs(zs[i].cy - zs[j].cy);
+                const float least = 0.043f * frame(kind, zs[i].view).w;
+                const bool apart = dx >= least || dy >= least;
+                if (!apart) std::printf("too close: %s / %s\n", zs[i].action, zs[j].action);
+                CHECK(apart);
+            }
+
+        // The images: the frames are their pixel sizes (the zones are placed in them).
+        for (const View v : {View::Front, View::Top}) {
+            uint32_t w = 0, h = 0;
+            png_size(std::string(DCP_PAD_ASSETS_DIR) + "/" + image_file(kind, v), w, h);
+            CHECK(w == frame(kind, v).w && h == frame(kind, v).h);
         }
 
-    // The images: the frames are their pixel sizes (the zones are placed in them).
-    uint32_t w = 0, h = 0;
-    png_size(std::string(DCP_PAD_ASSETS_DIR) + "/pad_front.png", w, h);
-    CHECK(w == kFrontW && h == kFrontH);
-    png_size(std::string(DCP_PAD_ASSETS_DIR) + "/pad_top.png", w, h);
-    CHECK(w == kTopW && h == kTopH);
+        // Label columns: left or right by where the button is; each side of each view has room to be told apart.
+        int left_front = 0, right_front = 0;
+        for (const Zone& z : zs)
+            if (z.view == View::Front) (label_on_left(kind, z) ? left_front : right_front)++;
+        CHECK(left_front >= 8 && right_front >= 8);
+        const Zone *l1 = nullptr, *r1 = nullptr;
+        for (const Zone& z : zs) {
+            if (std::string(z.action) == "l1") l1 = &z;
+            if (std::string(z.action) == "r1") r1 = &z;
+        }
+        CHECK(l1 && r1 && label_on_left(kind, *l1) && !label_on_left(kind, *r1));  // L on the left of the top view, as the player sees it
 
-    // Label columns: left or right by where the button is; each side of each view has room to be told apart.
-    int left_front = 0, right_front = 0;
-    for (const Zone& z : zones())
-        if (z.view == View::Front) (label_on_left(z) ? left_front : right_front)++;
-    CHECK(left_front >= 8 && right_front >= 8);
-    CHECK(label_on_left({"l1", "L1", View::Top, 211, 221, 0, 0, 0, 0, 0}) && !label_on_left({"r1", "R1", View::Top, 979, 221, 0, 0, 0, 0, 0}));
+        // Controller setup: every step asks for a button that has a zone.
+        for (const auto& step : dcp::padmap::kSteps) {
+            const char* act = action_for_step(step.target);
+            bool found = false;
+            for (const Zone& z : zs) found = found || (act && std::string(z.action) == act);
+            CHECK(found);
+        }
+    }
+    // The two controllers name their buttons their own way.
+    auto label_of = [](Kind k, const char* action) {
+        for (const Zone& z : zones(k))
+            if (std::string(z.action) == action) return std::string(z.label);
+        return std::string();
+    };
+    CHECK(label_of(Kind::Ps4, "cross") == "Cross" && label_of(Kind::Xbox, "cross") == "A");
+    CHECK(label_of(Kind::Ps4, "l2") == "L2" && label_of(Kind::Xbox, "l2") == "LT");
+    CHECK(label_of(Kind::Ps4, "touchpad") == "Touchpad" && label_of(Kind::Xbox, "touchpad") == "View");
+    CHECK(label_of(Kind::Xbox, "options") == "Menu");
 
     // spread(): order kept, gaps respected, inside the column, moved as little as possible.
     {
@@ -107,13 +133,7 @@ int main() {
         CHECK(spread({}, 10, 0, 10).empty());
     }
 
-    // Controller setup: every step asks for a button that has a zone, and the stick steps point at their direction.
-    for (const auto& step : dcp::padmap::kSteps) {
-        const char* act = action_for_step(step.target);
-        bool found = false;
-        for (const Zone& z : zones()) found = found || (act && std::string(z.action) == act);
-        CHECK(found);
-    }
+    // Controller setup: the stick steps point at their direction.
     CHECK(std::string(action_for_step("a")) == "cross" && std::string(action_for_step("lefttrigger")) == "l2");
     CHECK(std::string(action_for_step("leftx")) == "move_right" && std::string(action_for_step("righty")) == "look_down");
     CHECK(action_for_step("nonsense") == nullptr);

@@ -1024,11 +1024,18 @@ void draw_notes(const std::vector<dcp::net::update::NoteLine>& lines, ImFont* fo
 template <class Act>
 void draw_friend_lists(const dcp::net::FriendsState& L, bool busy, Act act, std::string& confirm_remove, float scale);
 
-// The two controller drawings, decoded on first use (the GL context exists by then).
+// The controller drawn on the Controls page and in the setup: set every frame from the gamepads that are connected.
+dcp::padlayout::Kind g_pad_kind = dcp::padlayout::Kind::Ps4;
+
+// The drawings of the controller being shown, decoded on first use (the GL context exists by then).
 const Tex& pad_tex(dcp::padlayout::View v) {
-    static const Tex front = load_texture_mem(kPad_front_png, kPad_front_png_size);
-    static const Tex top = load_texture_mem(kPad_top_png, kPad_top_png_size);
-    return v == dcp::padlayout::View::Front ? front : top;
+    using dcp::padlayout::Kind;
+    static const Tex ps4_front = load_texture_mem(kPad_ps4_front_png, kPad_ps4_front_png_size);
+    static const Tex ps4_top = load_texture_mem(kPad_ps4_top_png, kPad_ps4_top_png_size);
+    static const Tex xbox_front = load_texture_mem(kPad_xbox_front_png, kPad_xbox_front_png_size);
+    static const Tex xbox_top = load_texture_mem(kPad_xbox_top_png, kPad_xbox_top_png_size);
+    const bool front = v == dcp::padlayout::View::Front;
+    return g_pad_kind == Kind::Xbox ? (front ? xbox_front : xbox_top) : (front ? ps4_front : ps4_top);
 }
 
 // A button of the drawing coloured: `o` is where the drawing starts on screen, `k` its scale.
@@ -1042,10 +1049,10 @@ void draw_zone_highlight(ImDrawList* dl, ImVec2 o, float k, const dcp::padlayout
 void draw_pad_picture(const char* action, float w, float h) {
     using namespace dcp::padlayout;
     const Zone* zone = nullptr;
-    for (const Zone& z : zones())
+    for (const Zone& z : zones(g_pad_kind))
         if (action && std::string(z.action) == action) zone = &z;
     const View view = zone ? zone->view : View::Front;
-    const float iw = view == View::Front ? kFrontW : kTopW, ih = view == View::Front ? kFrontH : kTopH;
+    const float iw = frame(g_pad_kind, view).w, ih = frame(g_pad_kind, view).h;
     const float k = std::min(w / iw, h / ih);
     const ImVec2 p = ImGui::GetCursorScreenPos(), o(p.x + (w - iw * k) * 0.5f, p.y + (h - ih * k) * 0.5f);
     const Tex& img = pad_tex(view);
@@ -1054,7 +1061,7 @@ void draw_pad_picture(const char* action, float w, float h) {
     ImGui::Dummy(ImVec2(w, h));
 }
 
-// Controls page, controller view: one of the DualShock 4 line drawings (assets/: the front view for the buttons, the top view for the
+// Controls page, controller view: one of the line drawings of the connected controller, PlayStation's or Xbox's (assets/: the front view for the buttons, the top view for the
 // shoulder buttons) with, in a column to each side of the window, a clickable label per button (its name and the key bound to it,
 // pad_layout.h) joined to the button by a line. The button is coloured while its label is hovered. `conflicted(binding)` marks a key
 // used by two actions. Returns the index of the clicked binding, or -1.
@@ -1062,7 +1069,7 @@ template <class Conflict>
 int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, dcp::padlayout::View view, const Conflict& conflicted) {
     using namespace dcp::padlayout;
     const Tex& img = pad_tex(view);
-    const float iw = view == View::Front ? kFrontW : kTopW, ih = view == View::Front ? kFrontH : kTopH;
+    const float iw = frame(g_pad_kind, view).w, ih = frame(g_pad_kind, view).h;
     const float lh = ImGui::GetTextLineHeight();
 
     struct Item {
@@ -1072,7 +1079,7 @@ int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, d
     };
     std::vector<Item> items;
     float label_w = 0;  // every label as wide as the longest one: neat columns
-    for (const Zone& z : zones()) {
+    for (const Zone& z : zones(g_pad_kind)) {
         int idx = -1;
         for (int i = 0; i < int(binds.size()); ++i)
             if (binds[i].action == z.action) idx = i;
@@ -1088,7 +1095,7 @@ int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, d
     float need = 0;
     for (const bool left : {true, false}) {
         int n = 0;
-        for (const Item& it : items) n += label_on_left(*it.z) == left;
+        for (const Item& it : items) n += label_on_left(g_pad_kind, *it.z) == left;
         if (n) need = std::max(need, float(n - 1) * step + pill_h);
     }
     const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -1115,7 +1122,7 @@ int draw_pad_view(const std::vector<Binding>& binds, int capture, float max_h, d
         std::vector<const Item*> col_items;
         std::vector<float> want;
         for (const Item& it : items)
-            if (label_on_left(*it.z) == left) col_items.push_back(&it), want.push_back(o.y + it.z->cy * k);
+            if (label_on_left(g_pad_kind, *it.z) == left) col_items.push_back(&it), want.push_back(o.y + it.z->cy * k);
         const std::vector<float> ys = spread(want, step, start.y + pill_h * 0.5f, start.y + block_h - pill_h * 0.5f);
         const float px0 = left ? start.x : start.x + avail.x - label_w;
         for (size_t n = 0; n < col_items.size(); ++n) {
@@ -1358,6 +1365,14 @@ struct Pad {
         pads.clear();
     }
     bool pressed(Btn b) const { return held[b] && !prev[b]; }
+    // The drawing for what is connected: an Xbox pad shows the Xbox drawing, anything else (or nothing) the PlayStation one.
+    dcp::padlayout::Kind kind() const {
+        for (SDL_Gamepad* p : pads) {
+            const SDL_GamepadType t = SDL_GetGamepadType(p);
+            if (t == SDL_GAMEPAD_TYPE_XBOX360 || t == SDL_GAMEPAD_TYPE_XBOXONE) return dcp::padlayout::Kind::Xbox;
+        }
+        return dcp::padlayout::Kind::Ps4;
+    }
     void swallow() {  // what is held now stays ignored until released
         for (int i = 0; i < Count; ++i) mute[i] = mute[i] || raw[i], held[i] = false;
     }
@@ -2112,6 +2127,7 @@ int main(int argc, char** argv) {
         // Gamepad: read (closed while the game runs), then decide this frame's own actions from the state ImGui ended
         // the last frame with (B on a page = back to the sidebar, B in a dialog = close it, L1/R1 = page, Start = Play).
         pad.update(game.proc == 0 && !pad_setup.capturing());
+        if (!pad.pads.empty()) g_pad_kind = pad.kind();  // pads are closed while the game runs or the setup listens: keep the last one
         if (pad.touched) {
             input = Input::Pad;
             if (!pad_seen) pad_seen = true, pad.swallow(), nav_to_sidebar = true;  // first press: show the focus only
