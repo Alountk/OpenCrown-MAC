@@ -388,6 +388,12 @@ static void test_bug_report(const std::string& url) {
                                  "hash 0123456789abcdef0123456789abcdef frame 5600\n", me);
     CHECK(red == "hello secret=<secret> peer <ip> lan <ip> local 127.0.0.1:8787 friend <id> me 1234567890123456789 "
                  "v2.75.05 hash <hex> frame 5600\n");
+    // The machine line of a report from a Mac names macOS, not Linux (version fields only, no host or user names).
+    CHECK(macos_description("15.1", "24.1.0", "arm64") == "macOS 15.1 (Darwin 24.1.0, arm64)");
+    CHECK(macos_description("", "24.1.0", "arm64") == "macOS (Darwin 24.1.0, arm64)");
+#ifdef __APPLE__
+    CHECK(os_description().rfind("macOS", 0) == 0 && os_description().find("Linux") == std::string::npos);
+#endif
     CHECK(lobby_url_safe_for_secret("wss://lobby.example/") && lobby_url_safe_for_secret("ws://127.0.0.1:8787/") &&
           lobby_url_safe_for_secret("ws://192.168.1.5:8787/") && !lobby_url_safe_for_secret("ws://lobby.example/") &&
           !lobby_url_safe_for_secret("ws://8.8.8.8/"));

@@ -2194,7 +2194,9 @@ int main(int argc, char** argv) {
         // "Update" (6) is reached through the entry at the bottom of the sidebar, not the navigation list.
         const char* names[] = {"Game", "Controls", "Display", "Online", "Save Folder", "Report a Bug", "Update"};
         constexpr int kSettings = -1;
-        const int order[] = {0, 4, kSettings, 3, 5};
+        const bool bug_page = dcp::launcher::bug_report_page(kMac);
+        std::vector<int> order = {0, 4, kSettings, 3};
+        if (bug_page) order.push_back(5);
         auto in_settings = [](int t) { return t == 1 || t == 2; };
         if (first) {
             for (int t = 0; t < 7; ++t)
@@ -2203,6 +2205,7 @@ int main(int argc, char** argv) {
             if (in_settings(page)) settings_tab = page, settings_select = page;
         }
         if (!updater && page == 6) page = 0;  // no Update page where there is no updater (--tab Update, --updated)
+        if (!bug_page && page == 5) page = 0;  // nor a Report a Bug page on macOS (--tab "Report a Bug")
         // Update state snapshot for this frame.
         bool u_running, u_downloading, u_checked, u_installed;
         dcp::net::update::Result u_res;

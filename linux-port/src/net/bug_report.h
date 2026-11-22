@@ -31,6 +31,9 @@ std::string redact_log(std::string log, const Identity& id);
 // hardware ids.
 std::string os_description();
 
+// The machine line of a Mac: "macOS 15.1 (Darwin 24.1.0, arm64)" (the product version may be empty). Version fields only.
+std::string macos_description(const std::string& product_version, const std::string& darwin_release, const std::string& machine);
+
 // What a report carries as its log, exactly as Preview shows it: "OS: <os_description()>", a blank line and the
 // redacted tail of the log file (kBugReportLogMax bytes; only the OS line when there is no log).
 std::string report_log(const std::string& log_path, const Identity& id);
