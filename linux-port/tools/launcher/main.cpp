@@ -461,15 +461,20 @@ struct Game {
 };
 
 // The step markers of play-mac.sh in the log (platform.h phase_markers), whatever the compiler printed in between.
-std::vector<std::string> log_phase_markers(const std::string& path) {
+// `ninja` gets the latest Ninja progress line printed since the last marker (empty when there is none).
+std::vector<std::string> log_phase_markers(const std::string& path, std::string* ninja = nullptr) {
     std::ifstream f(path);
     std::deque<std::string> d;
-    std::string line;
-    while (std::getline(f, line))
+    std::string line, last;
+    int done = 0, total = 0;
+    while (std::getline(f, line)) {
         if (dcp::launcher::is_phase_marker(line)) {
             d.push_back(line);
+            last.clear();
             if (d.size() > 40) d.pop_front();
-        }
+        } else if (dcp::launcher::ninja_progress(line, &done, &total)) last = line;
+    }
+    if (ninja) *ninja = last;
     return {d.begin(), d.end()};
 }
 
@@ -2894,13 +2899,23 @@ int main(int argc, char** argv) {
             const float line = ImGui::GetTextLineHeight(), gap = ImGui::GetStyle().ItemSpacing.y;
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (play.y - (hints ? 2 * line + gap : line)) * 0.5f);
             // While play-mac.sh prepares the game (macOS) the log says which step it is on.
-            static std::string phase;
+            static dcp::launcher::PlayProgress phase;
             static double phase_t = -1;
             if (running) {
-                if (ImGui::GetTime() - phase_t > 0.5) phase = dcp::launcher::play_phase(log_phase_markers(log_path)), phase_t = ImGui::GetTime();
-            } else phase.clear(), phase_t = -1;
-            if (running && !phase.empty()) ImGui::TextColored(kDim, "%s", phase.c_str());
-            else if (running) ImGui::TextColored(kGood, "The game is running.");
+                if (ImGui::GetTime() - phase_t > 0.5) {
+                    std::string ninja;
+                    const auto markers = log_phase_markers(log_path, &ninja);
+                    phase = dcp::launcher::play_progress(markers, ninja), phase_t = ImGui::GetTime();
+                }
+            } else phase = {}, phase_t = -1;
+            const bool preparing = running && phase.step > 0;
+            const float bar_px = 6 * scale;
+            if (preparing) {
+                ImGui::SetCursorPosY(ImGui::GetCursorPosY() - (gap + bar_px) * 0.5f);  // the block grows by the bar: keep it centred
+                ImGui::TextColored(kDim, "%s", phase.text.c_str());
+                // A known fraction fills the bar; the recompile step, which prints no progress, gets ImGui's moving one.
+                ImGui::ProgressBar(phase.fraction >= 0 ? phase.fraction : -1.0f * float(ImGui::GetTime()), ImVec2(320 * scale, bar_px), "");
+            } else if (running) ImGui::TextColored(kGood, "The game is running.");
             else if (!game.error.empty()) ImGui::TextColored(kBad, "%s", game.error.c_str());
             else if (game.failed) {
                 ImGui::TextColored(kBad, "The game exited with code %lu.", (unsigned long)game.exit_code);

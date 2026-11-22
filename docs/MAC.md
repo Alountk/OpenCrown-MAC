@@ -38,7 +38,7 @@ cmake --build build --target opencrown_launcher
 
 The launcher is upstream's, adapted for macOS:
 
-- **Play** runs `play-mac.sh` and shows its step (preparing, recompiling, building); **Stop** ends it.
+- **Play** runs `play-mac.sh` and shows its step (1 preparing, 2 recompiling, 3 building) with a progress bar; the last files of step 3 are your game's own generated code and take the longest. **Stop** ends it.
 - There is no AppImage updater on macOS.
 - In the game, hold for 2 seconds **touchpad click + Options** on a PlayStation pad (**View + Menu** on an Xbox pad) to quit.
 

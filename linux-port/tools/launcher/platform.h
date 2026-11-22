@@ -143,4 +143,49 @@ inline std::string play_phase(const std::vector<std::string>& lines) {
     return "";
 }
 
-}  // namespace dcp::launcher
+// Ninja's progress line "[done/total] ...": true and the two numbers when `line` is one. Make's "[ 98%]" lines are not.
+inline bool ninja_progress(const std::string& line, int* done, int* total) {
+    if (line.size() < 5 || line[0] != '[') return false;
+    size_t i = 1;
+    auto number = [&](int* out) {
+        size_t start = i;
+        long v = 0;
+        while (i < line.size() && line[i] >= '0' && line[i] <= '9' && i - start < 7) v = v * 10 + (line[i++] - '0');
+        *out = int(v);
+        return i > start;
+    };
+    int d = 0, t = 0;
+    if (!number(&d) || i >= line.size() || line[i++] != '/' || !number(&t) || i >= line.size() || line[i] != ']') return false;
+    if (t <= 0 || d > t) return false;
+    *done = d, *total = t;
+    return true;
+}
+
+// What the play bar shows while play-mac.sh prepares the game: the step it is on (of 3), a sentence for it, and how far it is (0..1, or
+// negative when unknown: only the build steps tell, through `ninja_line`, the latest Ninja line since the last marker).
+struct PlayProgress {
+    int step = 0, steps = 3;
+    std::string text;
+    float fraction = -1;
+};
+inline PlayProgress play_progress(const std::vector<std::string>& markers, const std::string& ninja_line) {
+    PlayProgress p;
+    const std::string phase = play_phase(markers);
+    if (phase.empty()) return p;
+    const char* name = nullptr;
+    if (phase.rfind("Preparing", 0) == 0) p.step = 1, name = "preparing the recompiler";
+    else if (phase.rfind("Recompiling", 0) == 0) p.step = 2, name = "recompiling your game (first run only)";
+    else p.step = 3, name = "building the game for this Mac";
+    // The chunks of the game's own generated code are millions of lines each: the counter waits on them at the end.
+    auto generated = [&](const char* prefix) { return ninja_line.find(std::string("/gen/") + prefix + "_") != std::string::npos; };
+    if (p.step == 3 && (generated("eboot") || generated("libc"))) name = "building your game's code, the slowest part";
+    p.text = "Step " + std::to_string(p.step) + " of 3: " + name;
+    int d = 0, t = 0;
+    if (p.step != 2 && ninja_progress(ninja_line, &d, &t)) {  // the recompiler prints no progress
+        p.fraction = float(d) / float(t);
+        p.text += " (" + std::to_string(d) + "/" + std::to_string(t) + ")";
+    }
+    return p;
+}
+
+}  // namespace dcp::launcher}  // namespace dcp::launcher
