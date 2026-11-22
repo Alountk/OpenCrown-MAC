@@ -33,6 +33,10 @@ out=$(DCP_PLAY_BUILD_ONLY=1 "$script" "$game" 2>&1)
 check "build-only prepares dcp_run" 'echo "$out" | grep -q "^+ cmake --build .* --target dcp_run"'
 check "build-only does not launch the game" '! echo "$out" | grep -q "^+ .*run/dcp_run $game"'
 
+# An app started from the Finder has a bare PATH (/usr/bin:/bin...): Homebrew's folders (cmake, ninja) are added in front.
+out=$(PATH=/usr/bin:/bin DCP_PLAY_PRINT_PATH=1 "$script" "$game")
+check "Homebrew folders are on the PATH, ahead of the system ones" '[ "$out" = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" ]'
+
 # Unchanged inputs and an existing build: the recompile is skipped.
 stamp=$(DCP_PLAY_PRINT_STAMP=1 "$script" "$game")
 mkdir -p "$work/gen"; touch "$work/gen/eboot_table.cpp" "$work/gen/libc_table.cpp"

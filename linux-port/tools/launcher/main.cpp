@@ -491,6 +491,13 @@ void set_env(const char* k, const std::string& v) {  // "" removes it; inherited
     else setenv(k, v.c_str(), 1);
 }
 
+#ifdef __APPLE__
+// Where play-mac.sh is (inside the app bundle, or in the tree the launcher was built from).
+std::string mac_source_dir() {
+    return dcp::launcher::mac_source_dir(exe_dir(), DCP_SOURCE_DIR, [](const std::string& p) { return access(p.c_str(), X_OK) == 0; });
+}
+#endif
+
 bool start_game(Game& g, const Settings& s, const std::string& user, const std::string& log_path) {
     std::string eboot = find_ci(s.dump, "eboot.bin");
     if (eboot.empty()) { g.error = "eboot.bin not found in " + s.dump; return false; }
@@ -514,8 +521,8 @@ bool start_game(Game& g, const Settings& s, const std::string& user, const std::
     }
     flags.push_back("--size"), flags.push_back(std::to_string(s.width) + "x" + std::to_string(s.height));
 #ifdef __APPLE__
-    // The game code must be recompiled from the dump (play-mac.sh, in the source tree this launcher was built from).
-    std::vector<std::string> args = dcp::launcher::game_command(true, exe_dir(), DCP_SOURCE_DIR, eboot, flags);
+    // The game code must be recompiled from the dump (play-mac.sh, in the app bundle or in the source tree this launcher was built from).
+    std::vector<std::string> args = dcp::launcher::game_command(true, exe_dir(), mac_source_dir(), eboot, flags);
     std::string exe = args[0];
     if (access(exe.c_str(), X_OK) != 0) { g.error = "play-mac.sh not found (" + exe + ")"; return false; }
 #else

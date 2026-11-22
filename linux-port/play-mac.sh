@@ -9,6 +9,11 @@
 # and stops before starting the game.
 set -eu
 
+# An app started from the Finder has a bare PATH (/usr/bin:/bin...): put Homebrew's folders (cmake, ninja) in front.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+if [ "${DCP_PLAY_PRINT_PATH:-0}" = 1 ]; then echo "$PATH"; exit 0; fi
+
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "play-mac: $*" >&2; exit 1; }
 usage() { echo "usage: $0 <folder holding eboot.bin | eboot.bin> [dcp_run options...]" >&2; }

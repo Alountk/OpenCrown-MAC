@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <initializer_list>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -89,6 +90,15 @@ inline std::vector<std::string> game_command(bool mac, const std::string& exe_di
         cmd.push_back(flags[i]);
     }
     return cmd;
+}
+
+// The source tree that holds play-mac.sh: inside an app bundle (the launcher in Contents/MacOS, the tree in Contents/Resources/linux-port) when
+// it is there, so the app does not depend on where it was built; else `built_from`, the tree the launcher was built from. `exists` tells whether
+// a file is there.
+inline std::string mac_source_dir(const std::string& exe_dir, const std::string& built_from,
+                                  const std::function<bool(const std::string&)>& exists) {
+    const std::string bundled = exe_dir + "/../Resources/linux-port";
+    return exists(bundled + "/play-mac.sh") ? bundled : built_from;
 }
 
 // The self-updater (net/update.h) follows the upstream Linux releases and swaps an AppImage: it has nothing to offer on macOS, so there the
