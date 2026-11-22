@@ -49,7 +49,9 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] Launcher (tools/launcher, ImGui) builds and opens on macOS (spawn, `open`, exe path through tools/launcher/platform.h)
 - [x] Launcher on macOS: Play runs play-mac.sh and the status line shows its step (preparing / recompiling / building)
 - [ ] Launcher on macOS: check every page by hand (controls, display, online); hide the AppImage updater and Steam bits; a Stop button
-- [ ] Packaging and docs
+- [x] Launcher Controls page: visual controller view (PlayStation or Xbox drawing by the connected pad) and Controller setup showing the button it asks for
+- [x] Mac guide for users: `docs/MAC.md` (setup, controllers, keeping up with upstream)
+- [ ] Packaging
 - [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)

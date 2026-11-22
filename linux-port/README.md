@@ -58,6 +58,8 @@ on Discord or through the launcher's Report a Bug page. Saves, settings and logs
 
 ## Apple Silicon (native arm64, no JIT)
 
+For players: see [docs/MAC.md](../docs/MAC.md).
+
 ```sh
 ./play-mac.sh /path/to/your/dump/CUSA10454      # the folder holding eboot.bin and sce_module/libc.prx
 ./play-mac.sh /path/to/eboot.bin --fullscreen   # extra options go to dcp_run
