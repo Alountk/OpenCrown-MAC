@@ -42,6 +42,15 @@ The launcher is upstream's, adapted for macOS:
 - There is no AppImage updater on macOS.
 - In the game, hold for 2 seconds **touchpad click + Options** on a PlayStation pad (**View + Menu** on an Xbox pad) to quit.
 
+## As an app
+
+```sh
+cd linux-port
+sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app
+```
+
+The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The app is signed ad hoc, not notarized: the first time, right click it and choose **Open**. It has no icon yet. No game files are inside it.
+
 ## Controllers
 
 PlayStation and Xbox controllers work out of the box: the game reads them through SDL's gamepad API, which already maps them. The launcher's Controls page draws the controller you have connected (PlayStation's for any other or none) with a label on every button showing the key bound to it. Hover a label to colour its button; click it to rebind.

@@ -51,7 +51,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] Launcher on macOS: every page checked by hand; AppImage updater, Steam Deck / touch options, SDL GPU options and Report a Bug hidden; a Stop button
 - [x] Launcher Controls page: visual controller view (PlayStation or Xbox drawing by the connected pad) and Controller setup showing the button it asks for
 - [x] Mac guide for users: `docs/MAC.md` (setup, controllers, keeping up with upstream)
-- [ ] Packaging
+- [x] Packaging: `OpenCrown.app` built by `linux-port/packaging/make-app-mac.sh` (ad hoc signed)
+- [ ] Packaging: app icon, notarization (needs an Apple Developer account), DMG or zip
 - [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)
