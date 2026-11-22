@@ -33,6 +33,25 @@ out=$(DCP_PLAY_BUILD_ONLY=1 "$script" "$game" 2>&1)
 check "build-only prepares dcp_run" 'echo "$out" | grep -q "^+ cmake --build .* --target dcp_run"'
 check "build-only does not launch the game" '! echo "$out" | grep -q "^+ .*run/dcp_run $game"'
 
+# CMake refuses a build folder configured from another source folder (the repository, an app bundle, a moved app): those are started afresh,
+# a build folder made from this very tree is kept, and a work folder with no builds has nothing to remove.
+here=$(cd "$(dirname "$script")" && pwd)
+w2="$tmp/work2"; mkdir -p "$w2/tools" "$w2/run"
+out=$(DCP_WORK_DIR="$w2" "$script" "$game" 2>&1)
+check "builds of unknown origin are removed" 'echo "$out" | grep -q "^+ rm -rf $w2/tools $w2/run"'
+echo "/somewhere/else/linux-port" > "$w2/source-dir"
+out=$(DCP_WORK_DIR="$w2" "$script" "$game" 2>&1)
+check "builds from another source folder are removed" 'echo "$out" | grep -q "^+ rm -rf $w2/tools $w2/run"'
+echo "$here" > "$w2/source-dir"
+out=$(DCP_WORK_DIR="$w2" "$script" "$game" 2>&1)
+check "builds from this source folder are kept" '! echo "$out" | grep -q "^+ rm -rf"'
+out=$(DCP_WORK_DIR="$tmp/work3" "$script" "$game" 2>&1)
+check "a fresh work folder removes nothing" '! echo "$out" | grep -q "^+ rm -rf"'
+
+# An app started from the Finder has a bare PATH (/usr/bin:/bin...): Homebrew's folders (cmake, ninja) are added in front.
+out=$(PATH=/usr/bin:/bin DCP_PLAY_PRINT_PATH=1 "$script" "$game")
+check "Homebrew folders are on the PATH, ahead of the system ones" '[ "$out" = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" ]'
+
 # Unchanged inputs and an existing build: the recompile is skipped.
 stamp=$(DCP_PLAY_PRINT_STAMP=1 "$script" "$game")
 mkdir -p "$work/gen"; touch "$work/gen/eboot_table.cpp" "$work/gen/libc_table.cpp"

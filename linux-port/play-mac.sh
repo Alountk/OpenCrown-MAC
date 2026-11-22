@@ -9,6 +9,11 @@
 # and stops before starting the game.
 set -eu
 
+# An app started from the Finder has a bare PATH (/usr/bin:/bin...): put Homebrew's folders (cmake, ninja) in front.
+PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH
+if [ "${DCP_PLAY_PRINT_PATH:-0}" = 1 ]; then echo "$PATH"; exit 0; fi
+
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "play-mac: $*" >&2; exit 1; }
 usage() { echo "usage: $0 <folder holding eboot.bin | eboot.bin> [dcp_run options...]" >&2; }
@@ -55,6 +60,12 @@ run() {
 }
 
 [ "$dry" = 1 ] || mkdir -p "$work"
+# CMake refuses a build folder configured from another source folder (the repository, an app bundle, a moved or updated app): start those
+# afresh. The generated code is kept, it only depends on the dump and the recompiler's sources (the stamp).
+if { [ -e "$work/tools" ] || [ -e "$work/run" ]; } && [ "$(cat "$work/source-dir" 2>/dev/null || true)" != "$here" ]; then
+  run rm -rf "$work/tools" "$work/run"
+fi
+[ "$dry" = 1 ] || echo "$here" > "$work/source-dir"
 # arm64 builds need DCP_RECOMPILED=ON (compat.h); without DCP_RECOMPILED_DIR this tree builds only the tools.
 run cmake -S "$here" -B "$work/tools" $gen -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON -DDCP_RENDER=OFF
 run cmake --build "$work/tools" --target dcp_recompile -j"$jobs"

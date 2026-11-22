@@ -25,6 +25,12 @@ int main() {
     CHECK(!t.update(true, 1700));
     CHECK(!t.update(true, 3500));     // 1800 ms since the second press
     CHECK(t.update(true, 3700));
+    // Which buttons count: Options with Share (SDL "back") or with the touchpad click, as the Controller setup maps it to "back".
+    CHECK(dcp::input::combo_buttons(true, false, true));    // Share + Options
+    CHECK(dcp::input::combo_buttons(false, true, true));    // touchpad click + Options
+    CHECK(!dcp::input::combo_buttons(false, false, true));  // Options alone
+    CHECK(!dcp::input::combo_buttons(true, true, false));   // no Options
+    CHECK(!dcp::input::combo_buttons(false, false, false));
     if (!g_fail) std::puts("quit combo: all tests passed");
     return g_fail ? 1 : 0;
 }
