@@ -109,6 +109,37 @@ int main() {
     CHECK(play_phase({"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10", "[12/338] Building CXX object y"}) ==
           "Building the game for this Mac...");
     CHECK(play_phase({"+ cmake --build /w/run --target dcp_run -j10", "+ /w/run/dcp_run /d/eboot.bin --window --renderer gl", "eboot: base 0x1"}).empty());  // running
+    // Progress: Ninja's "[done/total]" line and the step of the three the script is on.
+    {
+        using dcp::launcher::ninja_progress;
+        using dcp::launcher::play_progress;
+        int d = 0, t = 0;
+        CHECK(ninja_progress("[249/536] Building C object a.o", &d, &t) && d == 249 && t == 536);
+        CHECK(ninja_progress("[1/1] Linking CXX executable x", &d, &t) && d == 1 && t == 1);
+        CHECK(!ninja_progress("+ cmake --build x", &d, &t) && !ninja_progress("[ 98%] Built target x", &d, &t));  // Make's lines are not Ninja's
+        CHECK(!ninja_progress("[0/0] odd", &d, &t) && !ninja_progress("[5/3] odd", &d, &t) && !ninja_progress("", &d, &t));
+        const std::vector<std::string> prep = {"+ cmake --build /w/tools --target dcp_recompile -j10"};
+        const std::vector<std::string> recomp = {"+ cmake --build /w/tools --target dcp_recompile -j10", "play-mac: recompiling your dump (about 2 minutes)"};
+        const std::vector<std::string> build = {"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10"};
+        auto p = play_progress(prep, "[3/30] Building CXX object x");
+        CHECK(p.step == 1 && p.steps == 3 && p.fraction > 0.099f && p.fraction < 0.101f);
+        CHECK(p.text == "Step 1 of 3: preparing the recompiler (3/30)");
+        p = play_progress(prep, "");  // no Ninja line yet: step known, progress not
+        CHECK(p.step == 1 && p.fraction < 0 && p.text == "Step 1 of 3: preparing the recompiler");
+        p = play_progress(recomp, "[30/30] Linking CXX executable dcp_recompile");  // the recompiler prints no progress: never a stale bar
+        CHECK(p.step == 2 && p.fraction < 0 && p.text == "Step 2 of 3: recompiling your game (first run only)");
+        p = play_progress(build, "[268/536] Building CXX object y");
+        CHECK(p.step == 3 && p.fraction > 0.499f && p.fraction < 0.501f && p.text == "Step 3 of 3: building the game for this Mac (268/536)");
+        // The chunks of the game's own generated code (gen/eboot_NNN.cpp, gen/libc_NNN.cpp) are the slow part: say so.
+        p = play_progress(build, "[520/536] Building CXX object CMakeFiles/dcp_game.dir/w/build/gen/eboot_015.cpp.o");
+        CHECK(p.step == 3 && p.text == "Step 3 of 3: building your game's code, the slowest part (520/536)");
+        p = play_progress(build, "[530/536] Building CXX object CMakeFiles/dcp_game.dir/w/build/gen/libc_002.cpp.o");
+        CHECK(p.text == "Step 3 of 3: building your game's code, the slowest part (530/536)");
+        p = play_progress(build, "[100/536] Building CXX object CMakeFiles/x.dir/src/eboot_loader.cpp.o");  // a source file that only looks alike
+        CHECK(p.text == "Step 3 of 3: building the game for this Mac (100/536)");
+        CHECK(play_progress({}, "[1/2] x").step == 0 && play_progress({}, "[1/2] x").text.empty());  // plain dcp_run: nothing to show
+        CHECK(play_progress({"+ /w/run/dcp_run /d/eboot.bin --window"}, "").step == 0);               // the game is running
+    }
     // The self-updater follows the upstream Linux releases (an AppImage): it exists only off macOS.
     CHECK(dcp::launcher::updater_supported(false));
     CHECK(!dcp::launcher::updater_supported(true));
