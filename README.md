@@ -26,6 +26,9 @@
   <a href="#faq">FAQ</a>
 </p>
 
+> [!NOTE]
+> **macOS fork.** This repository is a fork of OpenCrown PC that runs the game natively on **Apple Silicon**, with a Mac-aware launcher and PlayStation / Xbox controller support. See **[docs/MAC.md](docs/MAC.md)**. The rest of this README is upstream's.
+
 ---
 
 **OpenCrown PC** lets you play **Dragon's Crown Pro** on a Windows PC, on Linux or on a Steam Deck from a dump of your own PS4/PS5 copy. It is a native launcher, not an emulator: the game's own code runs directly on your CPU, while OpenCrown provides the PS4 system libraries, the renderer, input, saves and online play.
