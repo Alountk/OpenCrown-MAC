@@ -3,6 +3,9 @@
 
 #include <pwd.h>
 #include <sys/utsname.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 #include <unistd.h>
 
 #include <algorithm>
@@ -246,7 +249,19 @@ std::string ascii_line(std::string s) {
 }
 }  // namespace
 
+std::string macos_description(const std::string& product_version, const std::string& darwin_release, const std::string& machine) {
+    return ascii_line("macOS" + (product_version.empty() ? "" : " " + product_version) + " (Darwin " + darwin_release + ", " + machine + ")");
+}
+
 std::string os_description() {
+#ifdef __APPLE__
+    char ver[64] = {};
+    size_t n = sizeof ver - 1;
+    if (sysctlbyname("kern.osproductversion", ver, &n, nullptr, 0) != 0) ver[0] = 0;
+    utsname mu{};
+    if (uname(&mu) == 0) return macos_description(ver, mu.release, mu.machine);
+    return macos_description(ver, "?", "?");
+#endif
     // Distribution from os-release (PRETTY_NAME), kernel release and machine from uname - never uname's nodename
     // (the host name).
     std::string name;

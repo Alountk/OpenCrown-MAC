@@ -2194,7 +2194,9 @@ int main(int argc, char** argv) {
         // "Update" (6) is reached through the entry at the bottom of the sidebar, not the navigation list.
         const char* names[] = {"Game", "Controls", "Display", "Online", "Save Folder", "Report a Bug", "Update"};
         constexpr int kSettings = -1;
-        const int order[] = {0, 4, kSettings, 3, 5};
+        const bool bug_page = dcp::launcher::bug_report_page(kMac);
+        std::vector<int> order = {0, 4, kSettings, 3};
+        if (bug_page) order.push_back(5);
         auto in_settings = [](int t) { return t == 1 || t == 2; };
         if (first) {
             for (int t = 0; t < 7; ++t)
@@ -2203,6 +2205,7 @@ int main(int argc, char** argv) {
             if (in_settings(page)) settings_tab = page, settings_select = page;
         }
         if (!updater && page == 6) page = 0;  // no Update page where there is no updater (--tab Update, --updated)
+        if (!bug_page && page == 5) page = 0;  // nor a Report a Bug page on macOS (--tab "Report a Bug")
         // Update state snapshot for this frame.
         bool u_running, u_downloading, u_checked, u_installed;
         dcp::net::update::Result u_res;
@@ -2434,8 +2437,11 @@ int main(int argc, char** argv) {
                 slider_active = slider_active || ImGui::IsItemActive();
                 slider_id = ImGui::GetItemID();
                 page_entry();
-                ImGui::Checkbox("Touch screen moves the fairy (tap = interact)", &ctl.touch_screen);
-                ImGui::Checkbox("Steam Deck trackpads: right = fairy, left click = town map", &ctl.deck_trackpads);
+                const bool deck_touch = dcp::launcher::deck_touch_options(kMac);
+                if (deck_touch) {
+                    ImGui::Checkbox("Touch screen moves the fairy (tap = interact)", &ctl.touch_screen);
+                    ImGui::Checkbox("Steam Deck trackpads: right = fairy, left click = town map", &ctl.deck_trackpads);
+                }
                 ImGui::Checkbox("Japanese layout: Circle confirms, Cross cancels (menus only)", &set.confirm_circle);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("The game's own Japanese layout; button prompts follow it. Combat buttons stay the same.\n"
@@ -2444,7 +2450,7 @@ int main(int argc, char** argv) {
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("Off: no controller vibrates (DualShock 4, DualSense, Xbox and others).\n"
                                       "Applies the next time the game starts.");
-                {
+                if (deck_touch) {
                     static const char* const kClicks[] = {"Auto (Steam Deck Game Mode)", "Always", "Never"};
                     static const char* const kAttack[] = {"Auto (not on a Steam Deck)", "Always", "Never"};
                     ImGui::SetNextItemWidth(300 * scale);
@@ -2490,7 +2496,8 @@ int main(int argc, char** argv) {
                 ImGui::Checkbox("4K rendering (PS4 Pro mode)", &set.uhd);
                 ImGui::TextColored(kDim, "The game renders at 3840x2160 with its Pro assets; the window scales the picture.");
                 ImGui::Spacing();
-                {
+                const bool gpu_options = dcp::launcher::gpu_renderer_options(kMac);
+                if (gpu_options) {
                     static const char* const kRendererIds[] = {"auto", "gpu", "gl"};
                     static const char* const kRendererNames[] = {"Auto", "SDL GPU (Vulkan)", "OpenGL"};
                     int r = 0;
@@ -2536,28 +2543,30 @@ int main(int argc, char** argv) {
                     ImGui::SetTooltip("No tearing. On a 60 Hz display the game also keeps in step with the screen, so\n"
                                       "scrolling has no small hitch every few seconds. Leave it off on a G-Sync / FreeSync\n"
                                       "display. Adds a little input delay.");
-                if (set.uhd) {
-                    bool off = false;
-                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.45f, 0.45f, 0.45f, 0.35f));
-                    ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 0.35f);
-                    ImGui::BeginDisabled();
-                    ImGui::Checkbox("AMD FidelityFX Super Resolution 1 (FSR 1) upscaling", &off);
-                    ImGui::EndDisabled();
-                    ImGui::PopStyleVar();
-                    ImGui::PopStyleColor();
-                } else {
-                    ImGui::Checkbox("AMD FidelityFX Super Resolution 1 (FSR 1) upscaling", &set.fsr);
+                if (gpu_options) {
+                    if (set.uhd) {
+                        bool off = false;
+                        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.45f, 0.45f, 0.45f, 0.35f));
+                        ImGui::PushStyleVar(ImGuiStyleVar_DisabledAlpha, 0.35f);
+                        ImGui::BeginDisabled();
+                        ImGui::Checkbox("AMD FidelityFX Super Resolution 1 (FSR 1) upscaling", &off);
+                        ImGui::EndDisabled();
+                        ImGui::PopStyleVar();
+                        ImGui::PopStyleColor();
+                    } else {
+                        ImGui::Checkbox("AMD FidelityFX Super Resolution 1 (FSR 1) upscaling", &set.fsr);
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                        ImGui::SetTooltip("Sharper upscaling when the window is larger than the game's picture (for example\n"
+                                          "1080p rendering on a 1440p or 4K screen). SDL GPU renderer only.");
+                    if (set.uhd) ImGui::TextColored(kDim, "Not used with 4K rendering: the picture is already 4K, so there is nothing to upscale.");
+                    ImGui::SetNextItemWidth(220 * scale);
+                    ImGui::SliderInt("Sharpening", &set.sharpening, 0, 100, set.sharpening ? "%d%%" : "Off");
+                    slider_active = slider_active || ImGui::IsItemActive();
+                    sharpen_id = ImGui::GetItemID();
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("FSR 1 sharpening (RCAS), with or without FSR upscaling. SDL GPU renderer only.");
                 }
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                    ImGui::SetTooltip("Sharper upscaling when the window is larger than the game's picture (for example\n"
-                                      "1080p rendering on a 1440p or 4K screen). SDL GPU renderer only.");
-                if (set.uhd) ImGui::TextColored(kDim, "Not used with 4K rendering: the picture is already 4K, so there is nothing to upscale.");
-                ImGui::SetNextItemWidth(220 * scale);
-                ImGui::SliderInt("Sharpening", &set.sharpening, 0, 100, set.sharpening ? "%d%%" : "Off");
-                slider_active = slider_active || ImGui::IsItemActive();
-                sharpen_id = ImGui::GetItemID();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("FSR 1 sharpening (RCAS), with or without FSR upscaling. SDL GPU renderer only.");
                 ImGui::Spacing();
                 ImGui::TextUnformatted("Window size:");
                 static const int kPresets[][2] = {{1280, 720}, {1600, 900}, {1920, 1080}};
