@@ -40,7 +40,7 @@ The launcher is upstream's, adapted for macOS:
 
 - **Play** runs `play-mac.sh` and shows its step (preparing, recompiling, building); **Stop** ends it.
 - There is no AppImage updater on macOS.
-- In the game, hold **Select + Start** (Back + Menu on an Xbox pad) to quit.
+- In the game, hold for 2 seconds **touchpad click + Options** on a PlayStation pad (**View + Menu** on an Xbox pad) to quit.
 
 ## Controllers
 

@@ -203,6 +203,9 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
     size_t next_touch_event = 0;
 
     size_t next_shot = 0;
+#ifdef __APPLE__
+    SDL_RaiseWindow(win);  // a game started from the launcher opens behind it, without focus
+#endif
     // F1: frame stats in the window title (game flips/s, mean flip interval, host replay+present cost per frame).
     const bool stats_log = std::getenv("DCP_STATS") != nullptr;  // stats on from the start, also written to stderr
     bool stats = stats_log;

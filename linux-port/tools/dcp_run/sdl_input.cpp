@@ -225,7 +225,9 @@ public:
 #ifdef __APPLE__
         bool combo = false;  // Select + Start on any real gamepad (not the keyboard bindings)
         for (SDL_Gamepad* g : pads)
-            combo = combo || (SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_BACK) && SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_START));
+            combo = combo || dcp::input::combo_buttons(SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_BACK),
+                                                       SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_TOUCHPAD),
+                                                       SDL_GetGamepadButton(g, SDL_GAMEPAD_BUTTON_START));
         if (quit_combo_.update(combo, SDL_GetTicks())) quit_.store(true);
 #endif
         read_kbm(win, &s[0]);
@@ -535,6 +537,10 @@ std::map<std::string, std::string> prompt_bindings(const std::string& dir) {
 
 SdlInputPump* install_sdl_input(const std::string& dir, bool wrap_script) {
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");  // touches are fairy input, never mouse clicks (attacks)
+#ifdef __APPLE__
+    // macOS only delivers gamepad input to the focused app; the game window may not be focused when it opens (started from the launcher).
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#endif
     SDL_CreateDirectory(dir.c_str());
     std::string ini_path = dir + "/input.ini";
     if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) std::fprintf(stderr, "input: gamepads unavailable: %s\n", SDL_GetError());
