@@ -31,7 +31,7 @@ Tick a box only after the outcome was observed.
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
 - [ ] Differential check of recompiled game vs Rosetta reference (T7): `tests/t7_compare.py` written; frames identical through the first screens, character creation differs (random name, animation phase), cause not proven; x87 last-digit drift not measured
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
-- [ ] Input and the remaining filesystem paths on macOS (game files location, logs)
+- [x] Input and the remaining filesystem paths on macOS (user folder, logs; the quit combo is touchpad click + Options; after the controller setup Share is left unassigned)
 - [x] Menu boot, then first level (the whole game is played from the title through the levels, checked by hand)
 - [x] Online on one Mac: `play-mac-online-test.sh` starts a local lobby and two game copies (keyboard + gamepad); a room created in copy A is joined from copy B by code (`DCP_JOIN_CODE`), checked by hand
 - [x] Online: friend request by code (two launchers, one per account), then join the friend's room from the game, checked by hand on one Mac
