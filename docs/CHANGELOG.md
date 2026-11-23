@@ -4,6 +4,14 @@ Versions are `<upstream version>-mac.<n>`, for example `1.1-mac.1`: the upstream
 
 This is a fork of [OpenCrown PC](https://github.com/Nezara/OpenCrown-PC) by Nezara, used with the author's permission. The loader, HLE, renderer, audio, input and online play are theirs.
 
+## 1.2-mac.2
+
+- **Metal is now the default renderer.** The game draws through SDL GPU on Metal (MSL shaders generated from the SPIR-V) instead of OpenGL. On an M2 Pro it removes the CPU decoding of BC7 textures that held up the render thread (frame hitches of up to 160 ms) and cuts the render cost per frame to about a fifth; in a play session windows below 55 fps went from 13% to 3%. OpenGL is still there: pick it in Settings > Renderer, or run `play-mac.sh <dump> --renderer gl`.
+- The launcher shows Renderer, FSR 1 upscaling and Sharpening on macOS, and the renderer you pick now reaches the game (before, `play-mac.sh` forced OpenGL).
+- Not checked: pixels in a level against OpenGL (only the first screens, identical up to animation), and Macs other than an M2 Pro. If something looks wrong on Metal, choose OpenGL and tell us what you saw.
+- Tools: `DCP_RECORD_INPUT` records pad input to a script, `tests/perf_report.py` summarises `DCP_STATS` logs, `dcp_bench` benchmarks the two renderers without game data (see `docs/MAC.md`, Performance checks). The game logs CPU BC7 decodes of 5 ms or more.
+- The recompiled game code is unchanged, so your recompiled dump is reused.
+
 ## 1.2-mac.1
 
 - Based on upstream OpenCrown 1.2 (Transmogrify and Asia Vita support for Mobile; the Transmogrify source is not public yet, so it is not in this build). The recompiler and game code are unchanged, so your recompiled dump is reused.
