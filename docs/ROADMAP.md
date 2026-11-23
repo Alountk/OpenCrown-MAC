@@ -20,7 +20,7 @@ Tick a box only after the outcome was observed.
 - [x] libc `module_start` runs and returns
 - [x] Remaining unsupported instructions in libc: fxsave, fxrstor, fxtract and moves to/from segment registers lifted (checked against Rosetta). Left: 8 `sldt` that sit in zero-filled bytes decoded as code (never real code); the eboot has 27 more in one function (`0x63bf00`, called from `0x639ff0`) that look like data (pushf/sti/int1/sgdt runs) and trap if ever executed
 - [x] Game runs 5 frames natively on arm64 (`--frames 5`), engine threads created, no trap
-- [ ] Unresolved computed jumps in the eboot (26 sites) verified or fixed (libc memcpy tables done)
+- [ ] Unresolved computed jumps in the eboot (26 sites in about 23 functions, listed by `dcp_scan --indirect --all`): they dispatch by address at run time and the game aborts with a clear message if a target is not a recompiled function; none hit in the hand play above, not checked one by one (libc memcpy tables done)
 - [x] Compile time under control (functions over 20k lines built with optnone; full build ~2 min)
 
 ## Phase 4: Make it playable
@@ -32,7 +32,7 @@ Tick a box only after the outcome was observed.
 - [ ] Differential check of recompiled game vs Rosetta reference (T7): `tests/t7_compare.py` written; frames identical through the first screens. Past that, a fixed-vblank input script is timing sensitive (the on-screen keyboard shows three different states in both builds as the press moves), so it needs a deterministic clock or screen-driven input; no recompiler fault shown. x87 last-digit drift not measured
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
 - [x] Input and the remaining filesystem paths on macOS (user folder, logs; the quit combo is touchpad click + Options; after the controller setup Share is left unassigned)
-- [x] Menu boot, then first level (the whole game is played from the title through the levels, checked by hand)
+- [x] Menu boot, then first level (played by hand for about two hours: menus, characters, several points of the map and 3 or 4 quests, no abort; the whole game has not been played through)
 - [x] Online on one Mac: `play-mac-online-test.sh` starts a local lobby and two game copies (keyboard + gamepad); a room created in copy A is joined from copy B by code (`DCP_JOIN_CODE`), checked by hand
 - [x] Online: friend request by code (two launchers, one per account), then join the friend's room from the game, checked by hand on one Mac
 

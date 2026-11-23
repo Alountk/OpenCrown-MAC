@@ -18,7 +18,7 @@ using namespace dcp;
 
 
 int main(int argc, char** argv) {
-    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect | --show-jmp N | --lift out.cpp]\n"), 2;
+    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect [--all] | --show-jmp N | --lift out.cpp]\n"), 2;
     recomp::LoadedModule mod;
     try { mod = recomp::load_module(argv[1]); }
     catch (const std::exception& e) { return std::fprintf(stderr, "scan: %s\n", e.what()), 1; }
@@ -116,7 +116,7 @@ int main(int argc, char** argv) {
                         ++table_blocks, fn_table = true;
                         if (!fn.jump_tables.count(last.addr)) {
                             ++unresolved_idiom;
-                            if (unresolved_idiom <= 3) std::printf("unresolved idiom at 0x%llx (fn 0x%llx)\n", (unsigned long long)last.addr, (unsigned long long)r.start);
+                            if (unresolved_idiom <= 3 || (argc > 3 && !std::strcmp(argv[3], "--all"))) std::printf("unresolved idiom at 0x%llx (fn 0x%llx)\n", (unsigned long long)last.addr, (unsigned long long)r.start);
                         }
                     }
                 }
