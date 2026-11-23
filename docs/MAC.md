@@ -118,4 +118,6 @@ If the result is wrong, `git reset --hard mac-before-sync-<date>` on the sync br
 
 ## Legal
 
+See [NOTICE.md](NOTICE.md) for what is Nezara's and what is under the MIT licence.
+
 This is a hobby project, not affiliated with or endorsed by Vanillaware, Atlus, Sony or the upstream author. The upstream author gave permission for a Mac version and for release builds, on two conditions this fork keeps: credit to OpenCrown and its author (above, and in every release), and the public lobby as the default, so the player base is not split. There is no formal licence file upstream; the permission was given by message.

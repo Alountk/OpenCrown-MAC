@@ -18,7 +18,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
-# arm64: the platform layer runs recompiled game code instead of the PS4's x86-64 code (see odd/tasks/arm64-static-recomp.md).
+# arm64: the platform layer runs recompiled game code instead of the PS4's x86-64 code (see docs/MAC.md).
 option(DCP_RECOMPILED "Run recompiled game code (arm64 macOS)" OFF)
 if(DCP_RECOMPILED)
   add_compile_definitions(DCP_RECOMPILED=1)
@@ -303,7 +303,7 @@ add_executable(test_update tests/test_update.cpp)  # launcher self-updater: logi
 target_link_libraries(test_update PRIVATE dcp_net)
 add_test(NAME update COMMAND test_update)
 
-# Static recompiler (host tool, runs on the user's machine against their own dump; see ../odd/tasks/arm64-static-recomp.md).
+# Static recompiler (host tool, runs on the user's machine against their own dump; see ../docs/MAC.md).
 # Independent of the target architecture: it only decodes x86-64 bytes.
 option(DCP_RECOMP "Build the static recompiler" ON)
 if(DCP_RECOMP)

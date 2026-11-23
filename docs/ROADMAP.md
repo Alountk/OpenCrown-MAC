@@ -1,7 +1,7 @@
 # Roadmap: native arm64 macOS port
 
 Approach: static recompilation of the user's own decrypted eboot and PRX modules to C++ (no JIT, no game files in the repo).
-Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the outcome was observed.
+Tick a box only after the outcome was observed.
 
 ## Phase 1: Recompiler toolchain (done)
 - [x] x86-64 decoder, CFG discovery, jump-table recovery
