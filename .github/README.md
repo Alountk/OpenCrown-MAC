@@ -21,6 +21,6 @@ Full guide, controllers, building from source and keeping up with upstream: [doc
 
 OpenCrown's code is Nezara's and is not relicensed here; this fork uses it with their permission. The fork's own additions (the recompiler and the Mac scripts) are MIT. Details in [docs/NOTICE.md](../docs/NOTICE.md).
 
-This is a hobby project, not affiliated with or endorsed by Vanillaware, Atlus, Sony or Nezara. Never push or open pull requests to OpenCrown on this project's behalf without its author's agreement.
+This is a hobby project, not affiliated with or endorsed by Vanillaware, Atlus, Sony or Nezara. Anything meant for OpenCrown itself goes to its author, with their agreement.
 
 Upstream's own README, with everything about OpenCrown itself, is [here](../README.md).
