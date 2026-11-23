@@ -2,6 +2,11 @@
 
 Versions are `<upstream version>-mac.<n>`, for example `1.1-mac.1`: the upstream release this fork is based on, then this fork's own revision (`OPENCROWN_MAC_REVISION` in `linux-port/CMakeLists.txt`). Tags are `v1.1-mac.1`. Upstream's own changes are not listed here.
 
+## 1.1-mac.3
+
+- Recompiler: `fxsave`, `fxrstor`, `fxtract` and segment register moves are now translated (checked against Rosetta). The first run after updating recompiles your dump again (a few minutes).
+- New `tests/t7_compare.py`: runs your dump on arm64 and under Rosetta with the same scripted input and compares frames (see `docs/MAC.md`).
+
 ## 1.1-mac.2
 
 - Fix: the launcher (and the app) kept its settings, logs and saves in `~/.local/share/OpenCrown` while the game started from a terminal used `~/Library/Application Support/OpenCrown`. Both now use the Library folder. Existing data is not moved: copy it by hand from the old folder (keep a copy of the saves already in the new one).
