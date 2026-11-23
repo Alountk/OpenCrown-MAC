@@ -3,7 +3,7 @@
 <p align="center"><i>Dragon's Crown Pro, running natively on Apple Silicon</i></p>
 
 <p align="center">
-  <a href="https://github.com/Alountk/opencrown-mac/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alountk/opencrown-mac?label=release&color=c08a2a"></a>
+  <a href="https://github.com/Alountk/OpenCrown-MAC/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Alountk/OpenCrown-MAC?label=release&color=c08a2a"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Apple%20Silicon-3a5a8a">
   <img alt="Requires your own copy" src="https://img.shields.io/badge/requires-your%20own%20PS4%2FPS5%20dump-8a3a4a">
   <img alt="Online" src="https://img.shields.io/badge/online-OpenCrown%20lobby-3a8a5a">
@@ -40,7 +40,7 @@ This is a **macOS contribution to [OpenCrown PC](https://github.com/Nezara/OpenC
 
 ## Getting started
 
-1. Download the latest `.dmg` from **[Releases](https://github.com/Alountk/opencrown-mac/releases)**, open it and drag **OpenCrown** to Applications.
+1. Download the latest `.dmg` from **[Releases](https://github.com/Alountk/OpenCrown-MAC/releases)**, open it and drag **OpenCrown** to Applications.
 2. The app is signed ad hoc and not notarized (that needs a paid Apple Developer account), so the first time **right click it and choose Open**.
 3. Point it at your dump and press **Play**. The first run recompiles and builds the game on your Mac (a few minutes; it needs `cmake` and the Xcode command line tools). After that it starts in seconds.
 
