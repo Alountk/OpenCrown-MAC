@@ -66,8 +66,8 @@ On an Xbox pad the View button takes the place of the PlayStation touchpad click
 `linux-port/tests/t7_compare.py` runs your dump twice with the same scripted input (a Cross press every 150 vblanks) and compares frames at fixed vblanks: the recompiled arm64 `dcp_run` against the x86-64 build running under Rosetta 2 (build it with `build.sh`; Rosetta only advertises AVX when `ROSETTA_ADVERTISE_AVX=1`, which the script sets). It needs python3 with Pillow and keeps the frames outside the repository. Result so far (M2 Pro, `--noise` shows how much the reference varies by itself):
 
 - Up to the title (vblank 1200: the save prompt and the first screens) the arm64 frames are identical to the reference, within 1 of 255 on any channel.
-- On the character creation screen they differ: the random default name, the animated knight and the ornaments at the ends of the name bar. The reference differs from itself only in the name. This looks like animation driven by real time, but that is not proven.
-- Later frames were compared the same way and are not conclusive; nothing past the character screen was compared by hand.
+- On the character creation screen they differ. The reference differs from itself only in the random default name (about 0.1% of the pixels). Against the reference, the arm64 build differs in about 0.9% of the pixels, and this holds steady from about vblank 1870 on, so it is not an animation phase: once the on-screen keyboard fades in (after the Cross press at vblank 1850) its keys are **red** on arm64 and **grey** in the reference. Same input, same vblank, different result: a real difference, not yet explained (a recompiled instruction, or a different game state).
+- Later frames were compared the same way and are not conclusive.
 
 ## Online
 

@@ -29,7 +29,7 @@ Tick a box only after the outcome was observed.
 - [x] T5f3b-1: skip_offers second-ask warning in the recompiled build, through site hooks (`site` lines of the patch list)
 - [x] T5f3b-2: own_camera (separate cameras online) in the recompiled build, on the same site hooks; checked by hand with two copies on one Mac
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
-- [ ] Differential check of recompiled game vs Rosetta reference (T7): `tests/t7_compare.py` written; frames identical through the first screens, character creation differs (random name, animation phase), cause not proven; x87 last-digit drift not measured
+- [ ] Differential check of recompiled game vs Rosetta reference (T7): `tests/t7_compare.py` written; frames identical through the first screens; on the name entry screen the on-screen keyboard keys are red on arm64 and grey in the reference after the Cross press at vblank 1850 (steady, not time-driven), cause not found; x87 last-digit drift not measured
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
 - [x] Input and the remaining filesystem paths on macOS (user folder, logs; the quit combo is touchpad click + Options; after the controller setup Share is left unassigned)
 - [x] Menu boot, then first level (the whole game is played from the title through the levels, checked by hand)
