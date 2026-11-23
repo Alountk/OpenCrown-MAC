@@ -2512,10 +2512,9 @@ int main(int argc, char** argv) {
                 ImGui::Checkbox("4K rendering (PS4 Pro mode)", &set.uhd);
                 ImGui::TextColored(kDim, "The game renders at 3840x2160 with its Pro assets; the window scales the picture.");
                 ImGui::Spacing();
-                const bool gpu_options = dcp::launcher::gpu_renderer_options(kMac);
-                if (gpu_options) {
+                {
                     static const char* const kRendererIds[] = {"auto", "gpu", "gl"};
-                    static const char* const kRendererNames[] = {"Auto", "SDL GPU (Vulkan)", "OpenGL"};
+                    static const char* const kRendererNames[] = {"Auto", kMac ? "SDL GPU (Metal)" : "SDL GPU (Vulkan)", "OpenGL"};
                     int r = 0;
                     for (int i = 0; i < 3; ++i)
                         if (set.renderer == kRendererIds[i]) r = i;
@@ -2559,7 +2558,7 @@ int main(int argc, char** argv) {
                     ImGui::SetTooltip("No tearing. On a 60 Hz display the game also keeps in step with the screen, so\n"
                                       "scrolling has no small hitch every few seconds. Leave it off on a G-Sync / FreeSync\n"
                                       "display. Adds a little input delay.");
-                if (gpu_options) {
+                {
                     if (set.uhd) {
                         bool off = false;
                         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.45f, 0.45f, 0.45f, 0.35f));

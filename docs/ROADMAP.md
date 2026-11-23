@@ -48,7 +48,7 @@ Tick a box only after the outcome was observed.
 - [x] T6d: one-command pipeline for the user's own dump: `linux-port/play-mac.sh <dump folder>` (from scratch 235 s, then 8 s)
 - [x] Launcher (tools/launcher, ImGui) builds and opens on macOS (spawn, `open`, exe path through tools/launcher/platform.h)
 - [x] Launcher on macOS: Play runs play-mac.sh and the status line shows its step (preparing / recompiling / building)
-- [x] Launcher on macOS: every page checked by hand; AppImage updater, Steam Deck / touch options, SDL GPU options and Report a Bug hidden; a Stop button
+- [x] Launcher on macOS: every page checked by hand; AppImage updater, Steam Deck / touch options and Report a Bug hidden; renderer choice (Auto, SDL GPU (Metal), OpenGL), FSR 1 and sharpening shown since Metal works; a Stop button
 - [x] Launcher Controls page: visual controller view (PlayStation or Xbox drawing by the connected pad) and Controller setup showing the button it asks for
 - [x] Mac guide for users: `docs/MAC.md` (setup, controllers, keeping up with upstream)
 - [x] Packaging: `OpenCrown.app` built by `linux-port/packaging/make-app-mac.sh` (ad hoc signed)

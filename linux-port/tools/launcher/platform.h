@@ -105,10 +105,6 @@ inline std::string mac_source_dir(const std::string& exe_dir, const std::string&
 // launcher makes no start-up check, and shows no Update entry.
 inline bool updater_supported(bool mac) { return !mac; }
 
-// The SDL GPU renderer only loads SPIR-V shaders, so on macOS the game always draws with OpenGL: the renderer choice, FSR 1 and sharpening
-// (SDL GPU only) do nothing there and are not shown.
-inline bool gpu_renderer_options(bool mac) { return !mac; }
-
 // Touch screen, Steam Deck trackpads and "mouse buttons press game buttons" (a Steam Deck setting) are for Linux handhelds, not a Mac.
 inline bool deck_touch_options(bool mac) { return !mac; }
 

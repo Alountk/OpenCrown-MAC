@@ -155,7 +155,6 @@ int main() {
     }
     // The SDL GPU renderer only loads SPIR-V shaders, so on macOS the game always draws with OpenGL: the options that need SDL GPU
     // (renderer choice, FSR 1, sharpening) are left out there. The Steam Deck / touch-screen settings are Linux only too.
-    CHECK(dcp::launcher::gpu_renderer_options(false) && !dcp::launcher::gpu_renderer_options(true));
     CHECK(dcp::launcher::deck_touch_options(false) && !dcp::launcher::deck_touch_options(true));
     // Reports go to the lobby server, upstream's by default, and the fork has no public place for them yet: no Report a Bug page on macOS.
     CHECK(dcp::launcher::bug_report_page(false) && !dcp::launcher::bug_report_page(true));
