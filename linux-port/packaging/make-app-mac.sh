@@ -2,6 +2,7 @@
 # Builds OpenCrown.app for Apple Silicon: the launcher plus the source tree play-mac.sh needs (the game code is recompiled from the user's own
 # dump at the first Play, so no game files or generated code are ever inside the app).
 #   sh packaging/make-app-mac.sh [output folder]      (default: dist/ next to this folder); the icon is packaging/AppIcon.png
+# It also writes OpenCrown-<version>.dmg (the app and a link to Applications) in the same folder.
 # The app is signed ad hoc, not notarized: the first time, open it with right click > Open. It still needs cmake and the Xcode command line
 # tools on the Mac (play-mac.sh checks and says so). DCP_APP_DRY=1 prints the commands without running them (tests/make_app_mac_test.sh).
 set -eu
@@ -69,4 +70,14 @@ PLIST
 fi
 
 run codesign --force --deep --sign - "$app"
+
+# The disk image: the app and a link to Applications, so it is dragged in as usual.
+dmg="$out/OpenCrown-$version.dmg"
+stage="$build/dmg"
+run rm -rf "$stage" "$dmg"
+run mkdir -p "$stage"
+run cp -R "$app" "$stage/OpenCrown.app"
+run ln -s /Applications "$stage/Applications"
+run hdiutil create -volname OpenCrown -srcfolder "$stage" -ov -format UDZO "$dmg"
 echo "make-app-mac: $app"
+echo "make-app-mac: $dmg"
