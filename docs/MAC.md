@@ -61,6 +61,14 @@ For any other controller, or if buttons do the wrong thing, use **Set up a gamep
 
 On an Xbox pad the View button takes the place of the PlayStation touchpad click.
 
+## Checking the recompiler
+
+`linux-port/tests/t7_compare.py` runs your dump twice with the same scripted input (a Cross press every 150 vblanks) and compares frames at fixed vblanks: the recompiled arm64 `dcp_run` against the x86-64 build running under Rosetta 2 (build it with `build.sh`; Rosetta only advertises AVX when `ROSETTA_ADVERTISE_AVX=1`, which the script sets). It needs python3 with Pillow and keeps the frames outside the repository. Result so far (M2 Pro, `--noise` shows how much the reference varies by itself):
+
+- Up to the title (vblank 1200: the save prompt and the first screens) the arm64 frames are identical to the reference, within 1 of 255 on any channel.
+- On the character creation screen they differ: the random default name, the animated knight and the ornaments at the ends of the name bar. The reference differs from itself only in the name. This looks like animation driven by real time, but that is not proven.
+- Later frames were compared the same way and are not conclusive; nothing past the character screen was compared by hand.
+
 ## Online
 
 Online play is upstream's. On one Mac you can test it with two copies of the game:

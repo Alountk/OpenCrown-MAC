@@ -29,7 +29,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] T5f3b-1: skip_offers second-ask warning in the recompiled build, through site hooks (`site` lines of the patch list)
 - [x] T5f3b-2: own_camera (separate cameras online) in the recompiled build, on the same site hooks; checked by hand with two copies on one Mac
 - [ ] Load libSceFios2 and libSceNpToolkit2 (currently stubs)
-- [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
+- [ ] Differential check of recompiled game vs Rosetta reference (T7): `tests/t7_compare.py` written; frames identical through the first screens, character creation differs (random name, animation phase), cause not proven; x87 last-digit drift not measured
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
 - [ ] Input and the remaining filesystem paths on macOS (game files location, logs)
 - [x] Menu boot, then first level (the whole game is played from the title through the levels, checked by hand)
