@@ -23,6 +23,7 @@
 #include "net/online_check.h"
 #include "net/rudp.h"
 #include "net/stun.h"
+#include "../tools/common/input_defaults.h"
 #include "net/udp_carrier.h"
 #include "net/upnp.h"
 
@@ -462,6 +463,14 @@ static void test_user_dir() {
     CHECK(default_user_dir() == "/data/OpenCrown");
     setenv("DCP_USER_DIR", "/mine/", 1);
     CHECK(identity_dir() == "/mine");
+    // The launcher's folder (logs, launcher.ini, input.ini) is the same one the game and the identity use.
+    unsetenv("DCP_USER_DIR");
+    unsetenv("XDG_DATA_HOME");
+    CHECK(dcp::user_dir() == default_user_dir());
+    setenv("XDG_DATA_HOME", "/data", 1);
+    CHECK(dcp::user_dir() == default_user_dir());
+    setenv("DCP_USER_DIR", "/mine", 1);
+    CHECK(dcp::user_dir() == "/mine");
     unsetenv("DCP_USER_DIR");
     unsetenv("XDG_DATA_HOME");
 }

@@ -64,12 +64,17 @@ chat = Return
 )";
 
 // Per-user settings dir (input.ini, launcher.ini, saves/, logs/): $DCP_USER_DIR if set, else
-// ${XDG_DATA_HOME:-~/.local/share}/OpenCrown (the same dir as net::default_user_dir()).
+// ${XDG_DATA_HOME:-~/.local/share}/OpenCrown, on macOS ${XDG_DATA_HOME:-~/Library/Application Support}/OpenCrown (the same dir as
+// net::default_user_dir(); a test keeps them equal).
 inline std::string user_dir() {
     if (const char* d = std::getenv("DCP_USER_DIR"); d && *d) return d;
     if (const char* x = std::getenv("XDG_DATA_HOME"); x && *x == '/') return std::string(x) + "/OpenCrown";
     const char* home = std::getenv("HOME");
+#ifdef __APPLE__
+    return std::string(home && *home ? home : ".") + "/Library/Application Support/OpenCrown";
+#else
     return std::string(home && *home ? home : ".") + "/.local/share/OpenCrown";
+#endif
 }
 
 }  // namespace dcp
