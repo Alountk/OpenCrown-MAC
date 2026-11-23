@@ -27,6 +27,7 @@ OpenGL 3.3 (`--renderer`, see "Two renderers"). `dcp_viewer` shares `gl.*` and `
 ## Two renderers
 `--renderer auto|gpu|gl` (default auto; env `DCP_RENDERER` when the argument is absent; launcher Settings "Renderer").
 All decoding stays in `backend.cpp`; only the device differs.
+- **SDL GPU on macOS (Metal)**: `--renderer gpu` runs the same device on Metal. Metal takes MSL, not SPIR-V, so each `shaders/generated/*.spv.h` has a `*.msl.h` made by `tools/gen_msl.py` (spirv-cross, `brew install spirv-cross`; rerun it after the SPIR-V changes). BC7 is native there, with no CPU decode. Not the default yet: `auto` still picks OpenGL on a Mac until the images are compared.
 - **SDL GPU** (`gpu_device.cpp`, SDL_gpu on Vulkan: SDL dlopens `libvulkan.so.1`, SPIR-V shaders only; the Windows
   tree also has D3D12 / DXIL). We own the swapchain, so driver-forced antialiasing on the window cannot break the
   present (the GTX 1660 black window, bug reports 28/29, on Windows). Record then submit: draws are recorded (target, scissor, pipeline key, textures +
