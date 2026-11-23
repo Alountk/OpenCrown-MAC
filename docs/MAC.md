@@ -77,7 +77,19 @@ To compare runs (OpenGL against Metal, before and after a change) with the same 
 2. Replay it, with frame statistics on, once per setup: `DCP_STATS=1 DCP_USER_DIR=<copy> ./play-mac.sh <dump> --input route.txt --renderer gpu 2> run-metal.log` (`--renderer gl` for OpenGL).
 3. `python3 linux-port/tests/perf_report.py --from-vblank 1500 run-gl.log run-metal.log` counts the windows below 55, 45 and 30 fps, the slowest frame times, the render cost and the BC7 decodes done on the CPU.
 
-A replay can drift from the recording, because the game's state depends on timing (see above); look at the end of the run to see that it arrived where it should. A single stall of 140 ms shows up as one window near 47 fps.
+A replay can drift from the recording, because the game's state depends on timing (see above). Measured on a 7 minute route (title, town, a quest), two OpenGL replays of the same script agreed with each other only early on (20% of the pixels differed at vblank 3000, 2-4% at 10000 and 20000) and were on different screens by vblank 27400 (86%); neither followed the recording, which paused and chose another character. A long scripted route is therefore **not** a reliable benchmark. Use it only to look at frame statistics of one run, never to compare two setups; look at the end of the run to see where it arrived. A single stall of 140 ms shows up as one window near 47 fps.
+
+### Render device micro-benchmark
+
+`dcp_bench` runs the same render devices the game uses (OpenGL, and SDL GPU, which is Metal on a Mac) on synthetic data, so it needs no game files and gives repeatable numbers:
+
+```sh
+cmake -S linux-port -B build -DDCP_RECOMPILED=ON && cmake --build build --target dcp_bench
+./build/dcp_bench --renderer gl      # OpenGL (BC7 is decoded on the CPU on a Mac)
+./build/dcp_bench --renderer gpu     # SDL GPU (Metal on a Mac)
+```
+
+It uploads BC7 textures of 64 to 2048 pixels (time of the call, which is what holds up the render thread, and time until the pixels can be used) and runs a frame of 900 textured draws. Each result line also says how much of the target is not black, so a run that drew nothing is visible. M2 Pro, one 2048x2048 BC7 upload: OpenGL 34 ms, Metal 0.2 ms; a frame of 900 draws: OpenGL 1.9 ms, Metal 0.4 ms. It measures the cost of the two paths, not what causes a given dip in the game.
 
 ## Online
 

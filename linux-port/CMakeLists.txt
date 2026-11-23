@@ -204,6 +204,10 @@ if(DCP_RENDER)
   add_executable(dcp_viewer tools/dcp_viewer/main.cpp tools/dcp_viewer/anim.cpp)
   target_link_libraries(dcp_viewer PRIVATE dcp_formats dcp_render SDL3::SDL3-static)
 
+  # Render device micro-benchmark (BC7 upload cost, frame of many draws; no game data): see docs/MAC.md "Performance checks".
+  add_executable(dcp_bench tools/dcp_bench/main.cpp)
+  target_link_libraries(dcp_bench PRIVATE dcp_render SDL3::SDL3-static)
+
   # End-user launcher (GUI): dump folder, controls (input.ini), display options, online, starts dcp_run next to it.
   # Dear ImGui (MIT), same release as the Windows build; offline: -DFETCHCONTENT_SOURCE_DIR_IMGUI=<unpacked source>.
   # No -lGL: imgui_impl_opengl3's own loader dlopens libGL.so.1, the launcher's few GL calls go through SDL_GL_GetProcAddress.
