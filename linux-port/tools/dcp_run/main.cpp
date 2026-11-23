@@ -373,7 +373,7 @@ int main(int argc, char** argv) {
                              "               [--shot out.png] [--shots N=a.png,M=b.png] [--renderer auto|gpu|gl]\n"
                              "               [--vsync] [--fsr] [--sharpen S] [--scale S|window]\n"
                              "  --render: replay the game's frames (hidden window); --window shows them;\n"
-                             "  --renderer: auto = SDL GPU (Vulkan), OpenGL if that fails (default; env\n"
+                             "  --renderer: auto = SDL GPU (Vulkan, Metal on a Mac), OpenGL if that fails (default; env\n"
                              "  DCP_RENDERER when the argument is absent); gpu = SDL GPU or fail; gl = OpenGL 3.3\n"
                              "  --fullscreen: borderless desktop fullscreen (implies --window); --size: window size (1280x720)\n"
                              "  --4k: PS4 Pro mode, the game renders at 3840x2160\n"
