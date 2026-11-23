@@ -32,14 +32,14 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [ ] Differential check of recompiled game vs Rosetta reference (T7), including x87 last-digit drift
 - [x] Audio (CoreAudio, clean by ear); save data written and read back; user dir `~/Library/Application Support/OpenCrown` on macOS
 - [ ] Input and the remaining filesystem paths on macOS (game files location, logs)
-- [ ] Menu boot, then first level
+- [x] Menu boot, then first level (the whole game is played from the title through the levels, checked by hand)
 - [x] Online on one Mac: `play-mac-online-test.sh` starts a local lobby and two game copies (keyboard + gamepad); a room created in copy A is joined from copy B by code (`DCP_JOIN_CODE`), checked by hand
 - [x] Online: friend request by code (two launchers, one per account), then join the friend's room from the game, checked by hand on one Mac
 
 ## Phase 5: Rendering
 - [x] dcp_run --render builds and runs on arm64 (SDL3, GL 4.1 over Metal); capture sees the draws
 - [x] First visible frame on arm64 (the "Create save data?" prompt); the black frames were BC7 textures, which Apple's OpenGL rejects (CPU BC7 decoder)
-- [ ] Input: answer the prompts and reach the title and the menu
+- [x] Input: answer the prompts and reach the title and the menu (keyboard and gamepad, checked by hand)
 - [ ] Metal render backend (independent task)
 - [x] Performance measured (M2 Pro, 90 s of play): 60 fps with ample headroom; main game thread spent 60% of its time in a yield busy-wait, now throttled (CPU 142 s -> 80 s per 91 s of play, same pacing)
 - [ ] Performance: remaining hot spots if lower-end Macs need them (guest code on the main thread ~25% of a core, render thread ~33%)
