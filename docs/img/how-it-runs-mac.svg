@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" role="img" aria-labelledby="t d">
+  <title id="t">How OpenCrown runs on a Mac</title>
+  <desc id="d">Your own dump is recompiled to C++ once, built natively for arm64, and runs with OpenCrown's PS4 system layer.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#c08a2a"/></marker>
+  </defs>
+  <rect width="960" height="220" rx="14" fill="#1d1d24"/>
+  <g font-family="-apple-system, Helvetica, Arial, sans-serif" text-anchor="middle">
+    <g>
+      <rect x="30" y="50" width="190" height="110" rx="10" fill="#2a2a34" stroke="#8a3a4a" stroke-width="2"/>
+      <text x="125" y="95" fill="#f2ede4" font-size="19" font-weight="700">Your dump</text>
+      <text x="125" y="122" fill="#b8b2a6" font-size="14">eboot.bin + libc.prx</text>
+      <text x="125" y="142" fill="#b8b2a6" font-size="14">(you provide it)</text>
+    </g>
+    <path d="M222 105H262" stroke="#c08a2a" stroke-width="3" marker-end="url(#a)"/>
+    <g>
+      <rect x="268" y="50" width="190" height="110" rx="10" fill="#2a2a34" stroke="#c08a2a" stroke-width="2"/>
+      <text x="363" y="95" fill="#f2ede4" font-size="19" font-weight="700">Recompiler</text>
+      <text x="363" y="122" fill="#b8b2a6" font-size="14">x86-64 to C++</text>
+      <text x="363" y="142" fill="#b8b2a6" font-size="14">once, on your Mac</text>
+    </g>
+    <path d="M460 105H500" stroke="#c08a2a" stroke-width="3" marker-end="url(#a)"/>
+    <g>
+      <rect x="506" y="50" width="190" height="110" rx="10" fill="#2a2a34" stroke="#c08a2a" stroke-width="2"/>
+      <text x="601" y="95" fill="#f2ede4" font-size="19" font-weight="700">Native arm64</text>
+      <text x="601" y="122" fill="#b8b2a6" font-size="14">built with clang</text>
+      <text x="601" y="142" fill="#b8b2a6" font-size="14">no emulator, no JIT</text>
+    </g>
+    <path d="M698 105H738" stroke="#c08a2a" stroke-width="3" marker-end="url(#a)"/>
+    <g>
+      <rect x="744" y="50" width="190" height="110" rx="10" fill="#2a2a34" stroke="#3a8a5a" stroke-width="2"/>
+      <text x="839" y="95" fill="#f2ede4" font-size="19" font-weight="700">OpenCrown</text>
+      <text x="839" y="122" fill="#b8b2a6" font-size="14">PS4 libraries, graphics,</text>
+      <text x="839" y="142" fill="#b8b2a6" font-size="14">audio, saves, online</text>
+    </g>
+    <text x="480" y="200" fill="#b8b2a6" font-size="13">The generated code stays on your Mac and is never shared.</text>
+  </g>
+</svg>
