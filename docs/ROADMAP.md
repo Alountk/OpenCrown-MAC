@@ -57,4 +57,7 @@ Tick a box only after the outcome was observed.
 - Packaging: notarization dropped (needs a paid Apple Developer account); the app stays ad hoc signed, first open with right click > Open
 - [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [x] Upstream permission: the upstream author allowed (by message on Discord) a Mac version and release builds, asked for credit and for the public lobby to stay the default. No formal licence file exists upstream
+- [x] Versioned releases `<upstream>-mac.<n>` with a DMG each, made by hand (1.1-mac.1 to 1.1-mac.3, 1.2-mac.1); steps in `docs/MAC.md`
+- [x] Synced with upstream OpenCrown 1.2 (merge, tests, played by hand, released as 1.2-mac.1)
+- [x] Repository public as OpenCrown-MAC with the author's agreement; `docs/NOTICE.md` (upstream's code stays theirs, the fork's own files are MIT), landing README in `.github/` that credits the author first
 - [ ] Gitea remote (parked)
