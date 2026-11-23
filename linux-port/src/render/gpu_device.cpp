@@ -21,6 +21,20 @@
 #include "shaders/generated/main_vert.spv.h"
 #include "shaders/generated/present_frag.spv.h"
 #include "shaders/generated/present_vert.spv.h"
+#ifdef __APPLE__
+// The same shaders as Metal (MSL), made from the SPIR-V by tools/gen_msl.py: Metal does not take SPIR-V.
+#include "shaders/generated/downscale_frag.msl.h"
+#include "shaders/generated/easu_frag.msl.h"
+#include "shaders/generated/fsr_vert.msl.h"
+#include "shaders/generated/rcas_frag.msl.h"
+#include "shaders/generated/main_frag.msl.h"
+#include "shaders/generated/main_vert.msl.h"
+#include "shaders/generated/present_frag.msl.h"
+#include "shaders/generated/present_vert.msl.h"
+#define DCP_SHADER_BLOBS(N) k##N##Spv, sizeof k##N##Spv, k##N##Msl, sizeof k##N##Msl
+#else
+#define DCP_SHADER_BLOBS(N) k##N##Spv, sizeof k##N##Spv, nullptr, size_t(0)
+#endif
 
 namespace dcp::render {
 namespace {
@@ -126,12 +140,15 @@ public:
     // Shaders, the present pipeline and the white texture; err says what failed.
     bool create(std::string* err) {
         SDL_GPUShaderFormat have = SDL_GetGPUShaderFormats(dev_);
-        if (!(have & SDL_GPU_SHADERFORMAT_SPIRV)) return fail(err, "no SPIR-V shader support");
-        fmt_ = SDL_GPU_SHADERFORMAT_SPIRV;
-        vs_ = shader(kMainVertSpv, sizeof kMainVertSpv, SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
-        fs_ = shader(kMainFragSpv, sizeof kMainFragSpv, SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-        pvs_ = shader(kPresentVertSpv, sizeof kPresentVertSpv, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-        pfs_ = shader(kPresentFragSpv, sizeof kPresentFragSpv, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
+        if (have & SDL_GPU_SHADERFORMAT_SPIRV) fmt_ = SDL_GPU_SHADERFORMAT_SPIRV;
+#ifdef __APPLE__
+        else if (have & SDL_GPU_SHADERFORMAT_MSL) fmt_ = SDL_GPU_SHADERFORMAT_MSL;  // Metal
+#endif
+        else return fail(err, "no SPIR-V shader support");
+        vs_ = shader(DCP_SHADER_BLOBS(MainVert), SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
+        fs_ = shader(DCP_SHADER_BLOBS(MainFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+        pvs_ = shader(DCP_SHADER_BLOBS(PresentVert), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+        pfs_ = shader(DCP_SHADER_BLOBS(PresentFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 0);
         if (!vs_ || !fs_ || !pvs_ || !pfs_) return fail(err, std::string("shader: ") + SDL_GetError());
         for (TexFormat f : {TexFormat::RGBA8, TexFormat::BC1, TexFormat::BC2, TexFormat::BC3, TexFormat::BC7})
             if (!SDL_GPUTextureSupportsFormat(dev_, sdl_format(f), SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_SAMPLER))
@@ -145,10 +162,10 @@ public:
             const SDL_GPUTextureFormat sw = SDL_GetGPUSwapchainTextureFormat(dev_, win_);
             present_pipe_ = fullscreen_pipe(pvs_, pfs_, sw);
             if (!present_pipe_) return fail(err, std::string("present pipeline: ") + SDL_GetError());
-            fvs_ = shader(kFsrVertSpv, sizeof kFsrVertSpv, SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-            efs_ = shader(kEasuFragSpv, sizeof kEasuFragSpv, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-            rfs_ = shader(kRcasFragSpv, sizeof kRcasFragSpv, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-            dfs_ = shader(kDownscaleFragSpv, sizeof kDownscaleFragSpv, SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            fvs_ = shader(DCP_SHADER_BLOBS(FsrVert), SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+            efs_ = shader(DCP_SHADER_BLOBS(EasuFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            rfs_ = shader(DCP_SHADER_BLOBS(RcasFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
+            dfs_ = shader(DCP_SHADER_BLOBS(DownscaleFrag), SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
             if (fvs_ && efs_ && rfs_) {
                 easu_pipe_ = fullscreen_pipe(fvs_, efs_, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM);
                 rcas_pipe_ = fullscreen_pipe(fvs_, rfs_, sw);
@@ -386,9 +403,13 @@ private:
         return false;
     }
 
-    SDL_GPUShader* shader(const unsigned char* code, size_t n, SDL_GPUShaderStage stage, Uint32 samplers, Uint32 ubos) {
+    // One shader as SPIR-V and, on macOS, as MSL: the device format picks which (MSL's entry point is spirv-cross's "main0").
+    SDL_GPUShader* shader(const unsigned char* spv, size_t spv_n, const unsigned char* msl, size_t msl_n, SDL_GPUShaderStage stage,
+                          Uint32 samplers, Uint32 ubos) {
+        const bool metal = fmt_ == SDL_GPU_SHADERFORMAT_MSL;
         SDL_GPUShaderCreateInfo si{};
-        si.code_size = n, si.code = code, si.entrypoint = "main", si.format = fmt_, si.stage = stage;
+        si.code_size = metal ? msl_n : spv_n, si.code = metal ? msl : spv, si.entrypoint = metal ? "main0" : "main";
+        si.format = fmt_, si.stage = stage;
         si.num_samplers = samplers, si.num_uniform_buffers = ubos;
         return SDL_CreateGPUShader(dev_, &si);
     }

@@ -39,7 +39,11 @@ bool open_gpu(const RenderOptions& o, SDL_Window** win, SDL_GPUDevice** dev, std
               std::string* why) {
     *win = SDL_CreateWindow(kTitle, o.width, o.height, window_flags(o));
     if (!*win) { *why = std::string("window: ") + SDL_GetError(); return false; }
+#ifdef __APPLE__
+    *dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL, false, nullptr);  // Metal takes MSL
+#else
     *dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, false, nullptr);
+#endif
     bool claimed = false;
     auto undo = [&](const std::string& reason) {
         *why = reason;
