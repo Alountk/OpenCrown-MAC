@@ -19,6 +19,7 @@ struct Operand {
     bool high8 = false;      // ah / ch / dh / bh
     int8_t vec = kNoReg;     // xmm / ymm index 0..15 (bits = 128 or 256); kNoReg otherwise
     int8_t st = kNoReg;      // x87 register st(i), 0..7; kNoReg otherwise
+    int8_t seg = kNoReg;     // segment register 0..5 (es cs ss ds fs gs); kNoReg otherwise
     // Mem
     int8_t base = kNoReg, index = kNoReg;
     uint8_t scale = 1;

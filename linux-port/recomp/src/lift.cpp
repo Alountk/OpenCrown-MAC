@@ -121,6 +121,18 @@ struct Lifter {
         return fmt("st<%s>(%s, (%s)(%s));", ut(n), addr(o).c_str(), ut(n), v.c_str());
     }
 
+    // mov to / from a segment register. User code never changes them: a read gives the PS4 (FreeBSD amd64) user selector and a write
+    // keeps it (the program only reloads a value it read, for example in setcontext).
+    void segment_mov(const Insn& in) {
+        static const int sel[6] = {0x3b, 0x43, 0x3b, 0x3b, 0x13, 0x1b};  // es cs ss ds fs gs
+        const Operand& d = in.ops[0];
+        const Operand& s = in.ops[1];
+        if (s.seg != kNoReg && d.seg == kNoReg && d.kind != OpKind::None && (d.kind == OpKind::Mem || gpr(d)))
+            return emit(write(d, fmt("0x%x", sel[s.seg])));
+        if (d.seg != kNoReg && s.seg == kNoReg) return;
+        unsupported(in);
+    }
+
     bool supported_operands(const Insn& in) {
         for (int i = 0; i < in.nops; ++i) {
             const Operand& o = in.ops[i];
@@ -269,6 +281,9 @@ struct Lifter {
         if (mn == "fldcw") return emit(fmt("%s.cw = ld<u16>(%s);", f.c_str(), addr(a).c_str()));
         if (mn == "fnstenv") return emit(fmt("x87::fnstenv(%s, %s);", f.c_str(), addr(a).c_str()));
         if (mn == "fldenv") return emit(fmt("x87::fldenv(%s, %s);", f.c_str(), addr(a).c_str()));
+        if (mn == "fxtract") return emit(fmt("x87::fxtract(%s);", f.c_str()));
+        if (mn == "fxsave" && a.kind == OpKind::Mem) return emit(fmt("x87::fxsave(%s, x, %s);", f.c_str(), addr(a).c_str()));
+        if (mn == "fxrstor" && a.kind == OpKind::Mem) return emit(fmt("x87::fxrstor(%s, x, %s);", f.c_str(), addr(a).c_str()));
         unsupported(in);
     }
 
@@ -787,6 +802,7 @@ struct Lifter {
 
         if (mn == "nop") return;
         if (mn.size() > 1 && mn[0] == 'f' && mn != "fs") return x87_insn(in);
+        if (mn == "mov" && in.nops == 2 && (in.ops[0].seg != kNoReg || in.ops[1].seg != kNoReg)) return segment_mov(in);
         if (!supported_operands(in)) return;
         for (int i = 0; i < in.nops; ++i)
             if (is_vec(in.ops[i])) return vector_insn(in);

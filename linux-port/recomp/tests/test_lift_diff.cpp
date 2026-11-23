@@ -299,6 +299,25 @@ const Case kCases[] = {
     {"mov word ptr [rbx+34], 0x0b7f\nfldcw word ptr [rbx+34]\nfld qword ptr [rbx+8]\nfrndint\nfstp qword ptr [rbx+48]\nmov word ptr [rbx+34], 0x037f\nfldcw word ptr [rbx+34]", 0},
     {"fnstenv [rbx+32]\nfldenv [rbx+32]\nxor eax, eax\nmov qword ptr [rbx+32], rax\nmov qword ptr [rbx+40], rax\nmov qword ptr [rbx+48], rax\nmov qword ptr [rbx+56], rax", 0},
     {"fnclex\nfwait\nfnop", 0},
+    // fxtract: the exponent and the significand of st(0) (a zero gives -inf and the zero; an infinity gives +inf and itself)
+    {"fld qword ptr [rbx+8]\nfxtract\nfstp qword ptr [rbx+32]\nfstp qword ptr [rbx+40]", 0},
+    {"fild word ptr [rbx+6]\nfxtract\nfstp qword ptr [rbx+32]\nfstp qword ptr [rbx+40]", 0},
+    {"fldz\nfxtract\nfstp qword ptr [rbx+32]\nfstp qword ptr [rbx+40]", 0},
+    {"fld1\nfchs\nfxtract\nfstp qword ptr [rbx+32]\nfstp qword ptr [rbx+40]", 0},
+    // fxsave / fxrstor (the stack is empty across calls by the ABI, so the tag word is written as empty): the control word, the
+    // top and condition bits of the status word (its exception flags are not modelled), mxcsr (without its sticky exception flags), st0/st1 and the xmm registers are
+    // compared; the rest of the area (instruction pointers, reserved bytes) is zeroed so memory compares equal.
+    {"fxsave [rbx-128]\nmovzx r8d, word ptr [rbx-128]\nmovzx r9d, word ptr [rbx-126]\nand r9d, 0x7f00\nmov r10d, dword ptr [rbx-104]\nand r10d, 0xffc0\n"
+     "xor eax, eax\nlea rdi, [rbx-128]\nmov ecx, 20\nrep stosq", 0},
+    {"fld1\nfild word ptr [rbx+6]\nfxsave [rbx-128]\nmov r8, qword ptr [rbx-96]\nmovzx r9d, word ptr [rbx-88]\nmov r10, qword ptr [rbx-80]\n"
+     "movzx r11d, word ptr [rbx-72]\nmovzx r12d, word ptr [rbx-126]\nand r12d, 0x7f00\nfstp st(0)\nfstp st(0)\n"
+     "xor eax, eax\nlea rdi, [rbx-128]\nmov ecx, 20\nrep stosq", 0},
+    {"fxsave [rbx-128]\nvpxor xmm0, xmm0, xmm0\nvpxor xmm7, xmm7, xmm7\nfxrstor [rbx-128]\nxor eax, eax\nlea rdi, [rbx-128]\nmov ecx, 64\nrep stosq", 0},
+    {"fld1\nfild word ptr [rbx+6]\nfxsave [rbx-128]\nfstp st(0)\nfstp st(0)\nfxrstor [rbx-128]\nfstp qword ptr [rbx+96]\nmov r8, qword ptr [rbx+96]\n"
+     "fstp qword ptr [rbx+96]\nmov r9, qword ptr [rbx+96]\nxor eax, eax\nlea rdi, [rbx-128]\nmov ecx, 64\nrep stosq", 0},
+    // segment registers: a store keeps what the selector reads as and a load of a selector read just before changes nothing; the
+    // value itself is the PS4's (not Rosetta's), so only the store-then-clear shape is compared
+    {"mov word ptr [rbx+4], cs\nmov word ptr [rbx+6], ss\nmov ax, ds\nmov ds, ax\nmov ax, es\nmov es, ax\nxor eax, eax\nmov dword ptr [rbx+4], eax", 0},
     // vptest: only ZF and CF are compared (Rosetta 2 leaves OF/SF/AF/PF unchanged; the manuals clear them)
     // ---- double shifts, mxcsr, non-temporal moves, vptest, masked moves, flags push / pop ----
     {"shld rax, rbx, 5", ALL & ~(AF | OF)}, {"shld eax, ebx, 31", ALL & ~(AF | OF)}, {"shld rax, rbx, cl", ALL & ~(AF | OF)}, {"shld eax, ebx, cl", ALL & ~(AF | OF)}, {"shld ax, bx, 3", ALL & ~(AF | OF)},
