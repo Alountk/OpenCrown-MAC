@@ -34,7 +34,7 @@ This is a **macOS contribution to [OpenCrown PC](https://github.com/Nezara/OpenC
 - 🍎 **Native on Apple Silicon.** No emulator, no JIT: your dump is recompiled to C++ and built for arm64. Checked at 60 fps on an M2 Pro.
 - 🎮 **PlayStation and Xbox controllers** work out of the box, with a visual controller view and a setup wizard in the launcher.
 - 🌐 **Online co-op** through OpenCrown's public lobby, so Mac players join the same rooms as everyone else. Friend codes included.
-- 🔊 **Audio, saves and the full game**, played from the title through the levels.
+- 🔊 **Audio and saves**, played by hand through menus, characters and several quests.
 - 📦 **A normal Mac app**: `OpenCrown.app` in a `.dmg`, with an icon and a launcher.
 - 🧪 **Checked against the original**: the recompiler is tested instruction by instruction against Rosetta 2 (1,287 cases, 0 failures).
 
