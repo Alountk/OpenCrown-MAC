@@ -2,6 +2,8 @@
 
 Versions are `<upstream version>-mac.<n>`, for example `1.1-mac.1`: the upstream release this fork is based on, then this fork's own revision (`OPENCROWN_MAC_REVISION` in `linux-port/CMakeLists.txt`). Tags are `v1.1-mac.1`. Upstream's own changes are not listed here.
 
+This is a fork of [OpenCrown PC](https://github.com/Nezara/OpenCrown-PC) by Nezara, used with the author's permission. The loader, HLE, renderer, audio, input and online play are theirs.
+
 ## 1.1-mac.3
 
 - Recompiler: `fxsave`, `fxrstor`, `fxtract` and segment register moves are now translated (checked against Rosetta). The first run after updating recompiles your dump again (a few minutes).
