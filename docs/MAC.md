@@ -40,7 +40,7 @@ The launcher is upstream's, adapted for macOS:
 
 - **Play** runs `play-mac.sh` and shows its step (1 preparing, 2 recompiling, 3 building) with a progress bar; the last files of step 3 are your game's own generated code and take the longest. **Stop** ends it.
 - There is no AppImage updater on macOS.
-- **Settings > Renderer**: Auto picks SDL GPU on Metal (the default; smoother than OpenGL in our measurements), OpenGL stays available if Metal gives you trouble. FSR 1 upscaling and sharpening work on Metal.
+- **Settings > Renderer**: Auto picks SDL GPU on Metal (the default since this change; before it, `play-mac.sh` forced OpenGL; smoother than OpenGL in our measurements), OpenGL stays available if Metal gives you trouble (`--renderer gl` from a terminal does the same). FSR 1 upscaling and sharpening work on Metal.
 - In the game, hold for 2 seconds **touchpad click + Options** on a PlayStation pad (**View + Menu** on an Xbox pad) to quit.
 
 ## As an app

@@ -93,9 +93,9 @@ int main() {
     const V flags = {"--render", "--window", "--renderer", "auto", "--size", "1280x720"};
     CHECK((dcp::launcher::game_command(false, "/app", "/src", "/d/CUSA/eboot.bin", flags) ==
            V{"/app/dcp_run", "/d/CUSA/eboot.bin", "--render", "--window", "--renderer", "auto", "--size", "1280x720"}));
-    // macOS: the script gets the folder; the launcher's own --renderer is dropped (the script picks OpenGL, the only backend there).
+    // macOS: the script gets the folder and every option, --renderer included (it reaches dcp_run, which is how Settings picks OpenGL).
     CHECK((dcp::launcher::game_command(true, "/app", "/src", "/d/CUSA/eboot.bin", flags) ==
-           V{"/src/play-mac.sh", "/d/CUSA", "--render", "--window", "--size", "1280x720"}));
+           V{"/src/play-mac.sh", "/d/CUSA", "--render", "--window", "--renderer", "auto", "--size", "1280x720"}));
     CHECK((dcp::launcher::game_command(true, "/app", "/src", "eboot.bin", {"--4k"}) == V{"/src/play-mac.sh", ".", "--4k"}));
 
     // What the status line says while the script runs, from the end of the log (the latest phase marker wins).

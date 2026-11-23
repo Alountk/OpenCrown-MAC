@@ -88,5 +88,5 @@ if [ "${DCP_PLAY_BUILD_ONLY:-0}" = 1 ]; then  # everything is ready; the caller 
   exit 0
 fi
 
-echo "+ $work/run/dcp_run $eboot --window --renderer gl $*"
-[ "$dry" = 1 ] || exec "$work/run/dcp_run" "$eboot" --window --renderer gl "$@"
+echo "+ $work/run/dcp_run $eboot --window --renderer auto $*"
+[ "$dry" = 1 ] || exec "$work/run/dcp_run" "$eboot" --window --renderer auto "$@"
