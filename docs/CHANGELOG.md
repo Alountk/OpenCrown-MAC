@@ -4,6 +4,10 @@ Versions are `<upstream version>-mac.<n>`, for example `1.1-mac.1`: the upstream
 
 This is a fork of [OpenCrown PC](https://github.com/Nezara/OpenCrown-PC) by Nezara, used with the author's permission. The loader, HLE, renderer, audio, input and online play are theirs.
 
+## 1.2-mac.1
+
+- Based on upstream OpenCrown 1.2 (Transmogrify and Asia Vita support for Mobile; the Transmogrify source is not public yet, so it is not in this build). The recompiler and game code are unchanged, so your recompiled dump is reused.
+
 ## 1.1-mac.3
 
 - Recompiler: `fxsave`, `fxrstor`, `fxtract` and segment register moves are now translated (checked against Rosetta). The first run after updating recompiles your dump again (a few minutes).

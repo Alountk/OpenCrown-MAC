@@ -5,7 +5,7 @@ set(OPENCROWN_VERSION "1.2")  # Linux build; versioned separately from the Windo
 if(OPENCROWN_VERSION_OVERRIDE)
   set(OPENCROWN_VERSION "${OPENCROWN_VERSION_OVERRIDE}")
 endif()
-set(OPENCROWN_MAC_REVISION "3")  # this fork's own number, bumped per Mac release (tag v<upstream>-mac.<n>); OPENCROWN_VERSION stays upstream's, which the updater compares
+set(OPENCROWN_MAC_REVISION "1")  # this fork's own number, bumped per Mac release (tag v<upstream>-mac.<n>); OPENCROWN_VERSION stays upstream's, which the updater compares
 
 # Linux / Steam Deck build. Separate from the Windows tree (../port): own sources, own build, no shared files.
 # Targets are added here as each part of src/ is ported (see README.md, Phase 1).
