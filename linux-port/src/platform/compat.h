@@ -4,7 +4,7 @@
 
 #ifdef __APPLE__
 // Two ways to run on a Mac: the x86-64 build runs the PS4's code directly (Rosetta 2 on Apple Silicon); the arm64 build runs
-// code recompiled from it and must say so with DCP_RECOMPILED (see odd/tasks/arm64-static-recomp.md).
+// code recompiled from it and must say so with DCP_RECOMPILED (see docs/MAC.md).
 #if !defined(__x86_64__) && !defined(DCP_RECOMPILED)
 #error "Build with -DCMAKE_OSX_ARCHITECTURES=x86_64 (Rosetta 2), or for arm64 with -DDCP_RECOMPILED=ON (recompiled game code)"
 #endif

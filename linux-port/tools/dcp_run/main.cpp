@@ -350,7 +350,7 @@ void register_recompiled(const Loaded* m) {
     if (reg) reg(reinterpret_cast<unsigned long long>(m->img.base), m->img.size);
     if (!reg || g_unlinked)
         throw std::runtime_error("this build has no recompiled code for module '" + m->name +
-                                 "': run dcp_recompile on it and link the output (see odd/tasks/arm64-static-recomp.md)");
+                                 "': run dcp_recompile on it and link the output (see docs/MAC.md)");
 }
 #endif
 
