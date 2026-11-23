@@ -2316,7 +2316,11 @@ int main(int argc, char** argv) {
                                                               IM_COL32(235, 184, 97, 255), 2 * scale);
                 ImGui::TextColored(col, "%s", state.c_str());
             }
+            #ifdef OPENCROWN_VERSION_LABEL  // macOS: upstream's version plus this fork's revision
+            ImGui::TextColored(kDim, "v" OPENCROWN_VERSION_LABEL);
+#else
             ImGui::TextColored(kDim, "v" OPENCROWN_VERSION);
+#endif
         }
         ImGui::EndChild();
         ImGui::SameLine(0, 14 * scale);

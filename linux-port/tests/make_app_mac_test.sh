@@ -19,9 +19,12 @@ check "puts the icon in Contents/Resources" 'echo "$out" | grep "AppIcon.icns" |
 check "the Info.plist names the icon" 'grep -q "<key>CFBundleIconFile</key><string>AppIcon</string>" "$script"'
 png="$(dirname "$script")/AppIcon.png"
 check "AppIcon.png is a 1024 x 1024 PNG" '[ "$(od -An -tx1 -N8 "$png" | tr -d " \n")" = 89504e470d0a1a0a ] && [ "$(od -An -tu1 -j16 -N8 "$png" | xargs)" = "0 0 4 0 0 0 4 0" ]'
-check "makes a compressed DMG named with the version" 'echo "$out" | grep -q "^+ hdiutil create .*-format UDZO .*OpenCrown-[0-9][^ ]*.dmg"'
+check "makes a compressed DMG named with the version" 'echo "$out" | grep -q "^+ hdiutil create .*-format UDZO .*OpenCrown-[0-9.]*-mac\.[0-9][0-9]*\.dmg"'
 check "the DMG holds the app and a link to Applications" 'echo "$out" | grep -q "^+ ln -s /Applications .*/Applications" && echo "$out" | grep "^+ hdiutil create" | grep -q -- "-srcfolder"'
 check "the DMG is written next to the app" 'echo "$out" | grep "^+ hdiutil create" | grep -q "$tmp/out/OpenCrown-"'
+cm="$(dirname "$script")/../CMakeLists.txt"
+check "the Mac revision is stated once in CMakeLists.txt" '[ "$(grep -c "^set(OPENCROWN_MAC_REVISION " "$cm")" = 1 ]'
+check "the plist build number is numeric (upstream version + Mac revision)" 'grep -q "<key>CFBundleVersion</key><string>\$version.\$revision</string>" "$script"'
 check "nothing is created in dry mode" '[ ! -e "$tmp/out" ]'
 [ $fail -eq 0 ] && echo "make-app-mac: all tests passed"
 exit $fail

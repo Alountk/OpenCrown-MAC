@@ -2,7 +2,7 @@
 # Builds OpenCrown.app for Apple Silicon: the launcher plus the source tree play-mac.sh needs (the game code is recompiled from the user's own
 # dump at the first Play, so no game files or generated code are ever inside the app).
 #   sh packaging/make-app-mac.sh [output folder]      (default: dist/ next to this folder); the icon is packaging/AppIcon.png
-# It also writes OpenCrown-<version>.dmg (the app and a link to Applications) in the same folder.
+# It also writes OpenCrown-<version>-mac.<n>.dmg (the app and a link to Applications) in the same folder.
 # The app is signed ad hoc, not notarized: the first time, open it with right click > Open. It still needs cmake and the Xcode command line
 # tools on the Mac (play-mac.sh checks and says so). DCP_APP_DRY=1 prints the commands without running them (tests/make_app_mac_test.sh).
 set -eu
@@ -23,6 +23,9 @@ if [ "$dry" != 1 ]; then
 fi
 version=$(sed -n 's/^set(OPENCROWN_VERSION "\(.*\)").*/\1/p' "$here/CMakeLists.txt" | head -1)
 [ -n "$version" ] || die "cannot read the version from CMakeLists.txt"
+revision=$(sed -n 's/^set(OPENCROWN_MAC_REVISION "\(.*\)").*/\1/p' "$here/CMakeLists.txt" | head -1)
+[ -n "$revision" ] || die "cannot read OPENCROWN_MAC_REVISION from CMakeLists.txt"
+label="$version-mac.$revision"
 app="$out/OpenCrown.app"
 
 run cmake -S "$here" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON
@@ -60,8 +63,8 @@ if [ "$dry" != 1 ]; then
   <key>CFBundleExecutable</key><string>opencrown-launcher</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>$version</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleShortVersionString</key><string>$label</string>
+  <key>CFBundleVersion</key><string>$version.$revision</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
@@ -72,7 +75,7 @@ fi
 run codesign --force --deep --sign - "$app"
 
 # The disk image: the app and a link to Applications, so it is dragged in as usual.
-dmg="$out/OpenCrown-$version.dmg"
+dmg="$out/OpenCrown-$label.dmg"
 stage="$build/dmg"
 run rm -rf "$stage" "$dmg"
 run mkdir -p "$stage"

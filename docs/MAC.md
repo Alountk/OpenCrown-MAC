@@ -46,7 +46,7 @@ The launcher is upstream's, adapted for macOS:
 
 ```sh
 cd linux-port
-sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app and OpenCrown-<version>.dmg
+sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app and OpenCrown-<version>-mac.<n>.dmg
 ```
 
 The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The `.dmg` holds the app and a link to Applications: open it and drag the app across. The app is signed ad hoc, not notarized (that needs a paid Apple Developer account, which this free project does not use): the first time, right click it and choose **Open**. Its icon is `linux-port/packaging/AppIcon.png`, made from the project logo (with its own background) by `make-icon.py`. No game files are inside it.
@@ -71,6 +71,10 @@ cd linux-port
 ```
 
 It starts a local lobby and two game copies (keyboard and mouse in one, gamepad in the other). Separate cameras (`own_camera`) apply from the start of a real adventure, not in the first screens (stables, lobby).
+
+## Versions
+
+The fork numbers its releases `<upstream version>-mac.<n>` (for example `1.1-mac.1`, tag `v1.1-mac.1`) and lists them in [CHANGELOG.md](CHANGELOG.md). The revision lives in `OPENCROWN_MAC_REVISION` (`linux-port/CMakeLists.txt`); `OPENCROWN_VERSION` stays upstream's, so merging upstream keeps working.
 
 ## Keeping up with upstream
 
