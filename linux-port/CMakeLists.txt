@@ -276,6 +276,7 @@ if(APPLE AND DCP_PYTHON3)
   if(dcp_pil_rc EQUAL 0)
     add_test(NAME t7_compare_selftest COMMAND ${DCP_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/tests/t7_compare.py --selftest)
   endif()
+  add_test(NAME perf_report_selftest COMMAND ${DCP_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf_report.py --selftest)  # tests/perf_report.py: frame statistics of DCP_STATS logs
 endif()
 add_executable(test_net tests/test_net.cpp)  # loopback only
 target_link_libraries(test_net PRIVATE dcp_net)

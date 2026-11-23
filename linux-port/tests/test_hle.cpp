@@ -91,6 +91,24 @@ int main() {
     CHECK(!parse_input_script("10\n", &ev, &bad) && bad == 1);
     CHECK(parse_input_script("", &ev, &bad) && ev.empty());
 
+    // Input recording: what the game read becomes a script again (left stick at an edge = the script stick bits).
+    CHECK(script_bits(0x4000, 0x80, 0x80) == 0x4000);
+    CHECK(script_bits(0, 0x00, 0x80) == kScriptStickLeft && script_bits(0, 0x3f, 0x80) == kScriptStickLeft);
+    CHECK(script_bits(0, 0xff, 0x80) == kScriptStickRight && script_bits(0, 0xc0, 0x80) == kScriptStickRight);
+    CHECK(script_bits(0, 0x80, 0x00) == kScriptStickUp && script_bits(0, 0x80, 0xff) == kScriptStickDown);
+    CHECK(script_bits(0, 0x40, 0xbf) == 0 && script_bits(0x2000, 0xff, 0xff) == (0x2000 | kScriptStickRight | kScriptStickDown));
+    {
+        InputRecorder rec;
+        std::string text;
+        text += rec.feed(10, 0);        // nothing pressed yet: no line
+        text += rec.feed(100, 0x4000);  // a press
+        text += rec.feed(101, 0x4000);  // same state again: no line
+        text += rec.feed(106, 0);
+        text += rec.feed(300, kScriptStickLeft | 0x10);
+        CHECK(text == "100 0x4000\n106 0x0\n300 0x10000010\n");
+        CHECK(parse_input_script(text, &ev, &bad) && ev.size() == 3 && ev[2].frame == 300 && ev[2].buttons == 0x10000010);
+    }
+
     std::printf("hle: %d failures\n", g_fail);
     return g_fail ? 1 : 0;
 }

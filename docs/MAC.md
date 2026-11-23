@@ -69,6 +69,16 @@ On an Xbox pad the View button takes the place of the PlayStation touchpad click
 - On the character creation screen they differ, but this is not shown to be a recompiler fault. The reference differs from itself only in the random default name. Against it, the arm64 build differs in about 0.9% of the pixels, steady from about vblank 1870: the on-screen keyboard keys are red on arm64 and grey in the reference after the Cross press at vblank 1850. Moving that press by a few vblanks gives three different states (dark, grey, red) in **both** builds, and the reference also shows the red state when nothing is pressed. So the game state there depends on timing, and the two builds run at different speeds. A fixed-vblank script is therefore only reliable up to the title; beyond it, a deterministic clock (game time advancing by vblank) or input driven by what is on screen would be needed.
 - Later frames were compared the same way and are not conclusive.
 
+## Performance checks
+
+To compare runs (OpenGL against Metal, before and after a change) with the same play:
+
+1. Record a route once, from a copy of your saves so the start is always the same: `DCP_USER_DIR=<copy> DCP_RECORD_INPUT=route.txt ./play-mac.sh <dump>`. It writes one line per change of what the game read from the pad (buttons and the left stick as an edge; the right stick, analog triggers and the touchpad are not kept).
+2. Replay it, with frame statistics on, once per setup: `DCP_STATS=1 DCP_USER_DIR=<copy> ./play-mac.sh <dump> --input route.txt --renderer gpu 2> run-metal.log` (`--renderer gl` for OpenGL).
+3. `python3 linux-port/tests/perf_report.py --from-vblank 1500 run-gl.log run-metal.log` counts the windows below 55, 45 and 30 fps, the slowest frame times, the render cost and the BC7 decodes done on the CPU.
+
+A replay can drift from the recording, because the game's state depends on timing (see above); look at the end of the run to see that it arrived where it should. A single stall of 140 ms shows up as one window near 47 fps.
+
 ## Online
 
 Online play is upstream's. On one Mac you can test it with two copies of the game:

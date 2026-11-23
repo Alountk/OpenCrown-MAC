@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <mutex>
@@ -207,6 +208,23 @@ uint32_t script_buttons_at(const std::vector<InputEvent>& ev, uint64_t frame) {
         b = e.buttons;
     }
     return b;
+}
+
+uint32_t script_bits(uint32_t buttons, uint8_t lx, uint8_t ly) {
+    uint32_t b = buttons & ~kScriptStickMask;
+    if (lx < 0x40) b |= kScriptStickLeft;
+    if (lx > 0xbf) b |= kScriptStickRight;
+    if (ly < 0x40) b |= kScriptStickUp;
+    if (ly > 0xbf) b |= kScriptStickDown;
+    return b;
+}
+
+std::string InputRecorder::feed(uint64_t frame, uint32_t bits) {
+    if (bits == last_) return "";
+    last_ = bits;
+    char line[48];
+    std::snprintf(line, sizeof line, "%llu 0x%x\n", static_cast<unsigned long long>(frame), bits);
+    return line;
 }
 
 int64_t dmem_alloc(uint64_t* cursor, uint64_t start, uint64_t end, uint64_t len, uint64_t align) {
