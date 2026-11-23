@@ -5,6 +5,7 @@ set(OPENCROWN_VERSION "1.1")  # Linux build; versioned separately from the Windo
 if(OPENCROWN_VERSION_OVERRIDE)
   set(OPENCROWN_VERSION "${OPENCROWN_VERSION_OVERRIDE}")
 endif()
+set(OPENCROWN_MAC_REVISION "1")  # this fork's own number, bumped per Mac release (tag v<upstream>-mac.<n>); OPENCROWN_VERSION stays upstream's, which the updater compares
 
 # Linux / Steam Deck build. Separate from the Windows tree (../port): own sources, own build, no shared files.
 # Targets are added here as each part of src/ is ported (see README.md, Phase 1).
@@ -239,7 +240,7 @@ if(DCP_RENDER)
   set_target_properties(opencrown_launcher PROPERTIES OUTPUT_NAME "opencrown-launcher")
   target_compile_definitions(opencrown_launcher PRIVATE OPENCROWN_VERSION="${OPENCROWN_VERSION}")
   if(APPLE)  # Play runs play-mac.sh from the source tree this was built from
-    target_compile_definitions(opencrown_launcher PRIVATE DCP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+    target_compile_definitions(opencrown_launcher PRIVATE DCP_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}" OPENCROWN_VERSION_LABEL="${OPENCROWN_VERSION}-mac.${OPENCROWN_MAC_REVISION}")
   endif()
 endif()
 
