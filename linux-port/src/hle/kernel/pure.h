@@ -43,6 +43,18 @@ struct InputEvent { uint64_t frame; uint32_t buttons; };
 bool parse_input_script(const std::string& text, std::vector<InputEvent>* out, int* bad_line);
 uint32_t script_buttons_at(const std::vector<InputEvent>& ev, uint64_t frame);
 
+// Recording (DCP_RECORD_INPUT): what the game read from pad 0, written back as a script that --input replays. The left stick
+// beyond 1/4 of its travel becomes the script stick bits; the right stick, the analog triggers and the touchpad are not kept.
+uint32_t script_bits(uint32_t buttons, uint8_t lx, uint8_t ly);
+class InputRecorder {
+public:
+    // The script line ("<frame> 0x<bits>\n") when the state differs from the previous one, else "". The first state is "nothing pressed".
+    std::string feed(uint64_t frame, uint32_t bits);
+
+private:
+    uint32_t last_ = 0;
+};
+
 // Bump allocator for the direct-memory offset space: first `align`-aligned run of `len` in [start, end) at or after
 // `*cursor`. Returns the offset or -1; advances *cursor.
 int64_t dmem_alloc(uint64_t* cursor, uint64_t start, uint64_t end, uint64_t len, uint64_t align);

@@ -2,6 +2,8 @@
 // an InputSource. The user-service shim logs users in/out from pad_present().
 // Default source = Config::input_script (headless, deterministic: state keyed by vblank_count()); no script = a
 // connected pad with nothing pressed. Layouts: ScePadData 0x78 B, ScePadControllerInformation 0x1c B (SDK).
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -57,6 +59,20 @@ InputSource& source() {
     return *g_src;
 }
 
+// DCP_RECORD_INPUT=<file>: every change of what pad 0 gives the game is appended as a script line (see InputRecorder). Called with g_mu held.
+void record_input(uint64_t frame, const PadState& s) {
+    static std::FILE* out = [] {
+        const char* path = std::getenv("DCP_RECORD_INPUT");
+        std::FILE* f = path && *path ? std::fopen(path, "w") : nullptr;
+        if (path && *path) std::fprintf(stderr, f ? "HLE pad: recording input to %s\n" : "HLE pad: cannot open %s for the input recording\n", path);
+        return f;
+    }();
+    static InputRecorder rec;
+    if (!out) return;
+    const std::string line = rec.feed(frame, script_bits(s.buttons, s.lx, s.ly));
+    if (!line.empty()) std::fputs(line.c_str(), out), std::fflush(out);
+}
+
 DCP_SYSV int32_t scePadInit() { DCP_HLE_LOG("scePadInit", "ok"); return kOk; }
 
 DCP_SYSV int32_t scePadOpen(int32_t user, int32_t type, int32_t index, const void*) {
@@ -91,6 +107,7 @@ DCP_SYSV int32_t scePadReadState(int32_t h, uint8_t* d) {
     {
         std::lock_guard<std::mutex> lk(g_mu);
         s = source().read(slot, vblank_count());
+        if (slot == 0) record_input(vblank_count(), s);
     }
     std::memset(d, 0, 0x78);
     std::memcpy(d, &s.buttons, 4);
