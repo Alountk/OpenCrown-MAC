@@ -14,6 +14,11 @@ check "copies the source tree into Contents/Resources/linux-port" 'echo "$out" |
 check "the copied tree leaves build folders and dist out" 'echo "$out" | grep "Contents/Resources/linux-port" | grep -q -- "--exclude=build" && echo "$out" | grep "Contents/Resources/linux-port" | grep -q -- "--exclude=dist"'
 check "writes an Info.plist" 'echo "$out" | grep -q "Info.plist"'
 check "signs the app ad hoc" 'echo "$out" | grep -q "^+ codesign .*--sign - .*OpenCrown.app"'
+check "builds AppIcon.icns from packaging/AppIcon.png with iconutil" 'echo "$out" | grep -q "^+ iconutil .*AppIcon.icns"'
+check "puts the icon in Contents/Resources" 'echo "$out" | grep "AppIcon.icns" | grep -q "OpenCrown.app/Contents/Resources"'
+check "the Info.plist names the icon" 'grep -q "<key>CFBundleIconFile</key><string>AppIcon</string>" "$script"'
+png="$(dirname "$script")/AppIcon.png"
+check "AppIcon.png is a 1024 x 1024 PNG" '[ "$(od -An -tx1 -N8 "$png" | tr -d " \n")" = 89504e470d0a1a0a ] && [ "$(od -An -tu1 -j16 -N8 "$png" | xargs)" = "0 0 4 0 0 0 4 0" ]'
 check "nothing is created in dry mode" '[ ! -e "$tmp/out" ]'
 [ $fail -eq 0 ] && echo "make-app-mac: all tests passed"
 exit $fail

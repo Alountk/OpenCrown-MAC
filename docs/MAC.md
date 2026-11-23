@@ -49,7 +49,7 @@ cd linux-port
 sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app
 ```
 
-The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The app is signed ad hoc, not notarized: the first time, right click it and choose **Open**. It has no icon yet. No game files are inside it.
+The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The app is signed ad hoc, not notarized: the first time, right click it and choose **Open**. Its icon is `linux-port/packaging/AppIcon.png`, made from the project logo (with its own background) by `make-icon.py`. No game files are inside it.
 
 ## Controllers
 
