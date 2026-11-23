@@ -2,6 +2,7 @@
 // the VS (GL's row 0 is the bottom of the viewport), so game UVs sample render targets unchanged.
 #include <vector>
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -176,7 +177,11 @@ public:
         }
         if (!fmt && f == TexFormat::BC7) {
             decoded.resize(size_t(w) * size_t(h) * 4);
+            const auto t0 = std::chrono::steady_clock::now();
             dcp::formats::bc7_decode(static_cast<const uint8_t*>(data), w, h, decoded.data());
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+            // A decode runs on the render thread and holds up the frame: say so when it is long enough to be seen as a hitch.
+            if (ms >= 5.0) std::fprintf(stderr, "render: BC7 decode on the CPU %dx%d took %.1f ms (frame hitch)\n", int(w), int(h), ms);
             data = decoded.data();
         }
         if (!fmt) glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
