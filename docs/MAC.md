@@ -118,4 +118,4 @@ If the result is wrong, `git reset --hard mac-before-sync-<date>` on the sync br
 
 ## Legal
 
-This is a hobby project, not affiliated with or endorsed by Vanillaware, Atlus, Sony or the upstream author. Asking the upstream author for permission or a licence for the fork is still an open item in the [roadmap](ROADMAP.md).
+This is a hobby project, not affiliated with or endorsed by Vanillaware, Atlus, Sony or the upstream author. The upstream author gave permission for a Mac version and for release builds, on two conditions this fork keeps: credit to OpenCrown and its author (above, and in every release), and the public lobby as the default, so the player base is not split. There is no formal licence file upstream; the permission was given by message.
