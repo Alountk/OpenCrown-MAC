@@ -46,10 +46,10 @@ The launcher is upstream's, adapted for macOS:
 
 ```sh
 cd linux-port
-sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app
+sh packaging/make-app-mac.sh          # writes linux-port/dist/OpenCrown.app and OpenCrown-<version>.dmg
 ```
 
-The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The app is signed ad hoc, not notarized: the first time, right click it and choose **Open**. Its icon is `linux-port/packaging/AppIcon.png`, made from the project logo (with its own background) by `make-icon.py`. No game files are inside it.
+The app is the launcher plus a copy of the source tree. Play works as above: the first run recompiles your dump and builds the game on your Mac, so it needs `cmake` and the Xcode command line tools too. The `.dmg` holds the app and a link to Applications: open it and drag the app across. The app is signed ad hoc, not notarized (that needs a paid Apple Developer account, which this free project does not use): the first time, right click it and choose **Open**. Its icon is `linux-port/packaging/AppIcon.png`, made from the project logo (with its own background) by `make-icon.py`. No game files are inside it.
 
 ## Controllers
 

@@ -53,7 +53,8 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 - [x] Mac guide for users: `docs/MAC.md` (setup, controllers, keeping up with upstream)
 - [x] Packaging: `OpenCrown.app` built by `linux-port/packaging/make-app-mac.sh` (ad hoc signed)
 - [x] Packaging: app icon (`linux-port/packaging/AppIcon.png`)
-- [ ] Packaging: notarization (needs an Apple Developer account), DMG or zip
+- [x] Packaging: `OpenCrown-<version>.dmg` (the app and a link to Applications)
+- Packaging: notarization dropped (needs a paid Apple Developer account); the app stays ad hoc signed, first open with right click > Open
 - [x] Linux behaviour kept: macOS-only changes (audio pacing, yield throttle) guarded; headless Linux x86-64 build checked in a container (found and fixed two Linux breakages)
 - [ ] Upstream licence / permission
 - [ ] Gitea remote (parked)
