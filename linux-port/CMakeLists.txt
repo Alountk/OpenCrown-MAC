@@ -269,6 +269,14 @@ add_test(NAME save_check COMMAND test_save_check)
 add_test(NAME play_mac_online COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/play_mac_online_test.sh ${CMAKE_CURRENT_SOURCE_DIR}/play-mac-online-test.sh)  # in dry mode
 add_test(NAME play_mac COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/play_mac_test.sh ${CMAKE_CURRENT_SOURCE_DIR}/play-mac.sh)  # play-mac.sh in dry mode
 add_test(NAME make_app_mac COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/tests/make_app_mac_test.sh ${CMAKE_CURRENT_SOURCE_DIR}/packaging/make-app-mac.sh)  # make-app-mac.sh in dry mode
+# T7 comparison script (tests/t7_compare.py): only its self-test runs here; the real check needs the user's dump (docs/MAC.md)
+find_program(DCP_PYTHON3 python3)
+if(APPLE AND DCP_PYTHON3)
+  execute_process(COMMAND ${DCP_PYTHON3} -c "import PIL" RESULT_VARIABLE dcp_pil_rc OUTPUT_QUIET ERROR_QUIET)
+  if(dcp_pil_rc EQUAL 0)
+    add_test(NAME t7_compare_selftest COMMAND ${DCP_PYTHON3} ${CMAKE_CURRENT_SOURCE_DIR}/tests/t7_compare.py --selftest)
+  endif()
+endif()
 add_executable(test_net tests/test_net.cpp)  # loopback only
 target_link_libraries(test_net PRIVATE dcp_net)
 add_test(NAME net COMMAND test_net)
