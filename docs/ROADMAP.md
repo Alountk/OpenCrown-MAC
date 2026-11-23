@@ -18,7 +18,7 @@ Detailed task log: `odd/tasks/arm64-static-recomp.md`. Tick a box only after the
 ## Phase 3: First boot (in progress)
 - [x] eboot and libc recompile and link into `dcp_run`
 - [x] libc `module_start` runs and returns
-- [ ] Remaining unsupported instructions in libc (pcmpistri/m done; enter, pushfw, xlat, fxsave, sldt, segment mov, rcr, fiadd/fisub, std left)
+- [x] Remaining unsupported instructions in libc: fxsave, fxrstor, fxtract and moves to/from segment registers lifted (checked against Rosetta). Left: 8 `sldt` that sit in zero-filled bytes decoded as code (never real code); the eboot has 27 more in one function (`0x63bf00`, called from `0x639ff0`) that look like data (pushf/sti/int1/sgdt runs) and trap if ever executed
 - [x] Game runs 5 frames natively on arm64 (`--frames 5`), engine threads created, no trap
 - [ ] Unresolved computed jumps in the eboot (26 sites) verified or fixed (libc memcpy tables done)
 - [x] Compile time under control (functions over 20k lines built with optnone; full build ~2 min)

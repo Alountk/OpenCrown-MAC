@@ -983,6 +983,45 @@ inline void fldenv(Fpu& f, u64 a) {
     std::memcpy(&sw, reinterpret_cast<const void*>(a + 4), 2);
     f.cw = cw, set_status(f, sw);
 }
+// fxtract: st(0) becomes the unbiased exponent and the significand (1.x) is pushed above it. A zero gives -inf and the zero itself, an
+// infinity gives +inf and itself, a NaN stays a NaN in both.
+inline void fxtract(Fpu& f) {
+    const double v = reg(f, 0);
+    double sig = v, ex = v;
+    if (std::isinf(v)) ex = std::numeric_limits<double>::infinity();
+    else if (v == 0) ex = -std::numeric_limits<double>::infinity();
+    else if (!std::isnan(v)) {
+        int e;
+        sig = std::frexp(v, &e) * 2;
+        ex = double(e - 1);
+    }
+    reg(f, 0) = ex;
+    push(f, sig);
+}
+// fxsave / fxrstor: the 512-byte area (control word, status word, tag word, mxcsr, st(0..7) at 32 + 16 i, xmm0..15 at 160 + 16 i). The
+// x87 stack is empty across calls by the ABI, so the tag word is written as empty and ignored on the way back; the instruction and
+// operand pointers are zero. The upper halves of the ymm registers are left alone by fxrstor, as on the hardware.
+inline void fxsave(const Fpu& f, const Vec* x, u64 a) {
+    u8* p = reinterpret_cast<u8*>(a);
+    std::memset(p, 0, 160);
+    const u16 sw = status(f);
+    std::memcpy(p, &f.cw, 2);
+    std::memcpy(p + 2, &sw, 2);
+    const u32 mxcsr = 0x1f80, mask = 0xffff;
+    std::memcpy(p + 24, &mxcsr, 4);
+    std::memcpy(p + 28, &mask, 4);
+    for (int i = 0; i < 8; ++i) to80(a + 32 + 16 * u64(i), f.r[(f.top + unsigned(i)) & 7]);
+    for (int i = 0; i < 16; ++i) std::memcpy(p + 160 + 16 * i, x[i].q, 16);
+}
+inline void fxrstor(Fpu& f, Vec* x, u64 a) {
+    const u8* p = reinterpret_cast<const u8*>(a);
+    u16 cw, sw;
+    std::memcpy(&cw, p, 2);
+    std::memcpy(&sw, p + 2, 2);
+    f.cw = cw, set_status(f, sw);
+    for (int i = 0; i < 8; ++i) reg(f, i) = from80(a + 32 + 16 * u64(i));
+    for (int i = 0; i < 16; ++i) std::memcpy(x[i].q, p + 160 + 16 * i, 16);
+}
 inline void fscale(Fpu& f) {
     const double e = std::trunc(reg(f, 1));
     reg(f, 0) = std::ldexp(reg(f, 0), int(std::fmax(-100000.0, std::fmin(100000.0, e))));

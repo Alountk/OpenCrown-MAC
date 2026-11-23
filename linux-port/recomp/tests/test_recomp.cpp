@@ -18,6 +18,12 @@ static void test_decode() {
     CHECK(decode(add, sizeof add, 0x1000, i));
     CHECK(i.len == 3 && i.flow == Flow::Normal && i.text == "add rax, rbx");
 
+    // segment registers keep their index (es cs ss ds fs gs = 0..5), which the lifter turns into the PS4's user selector
+    const uint8_t from_seg[6][2] = {{0x8c, 0xc0}, {0x8c, 0xc8}, {0x8c, 0xd0}, {0x8c, 0xd8}, {0x8c, 0xe0}, {0x8c, 0xe8}};  // mov eax, es..gs
+    for (int k = 0; k < 6; ++k) CHECK(decode(from_seg[k], 2, 0x1000, i) && i.ops[1].seg == k && i.ops[0].seg == kNoReg);
+    const uint8_t to_ds[] = {0x8e, 0xd8};  // mov ds, eax
+    CHECK(decode(to_ds, sizeof to_ds, 0x1000, i) && i.ops[0].seg == 3 && i.ops[1].seg == kNoReg);
+
     const uint8_t call[] = {0xe8, 0xfb, 0x0f, 0x00, 0x00};  // call +0xffb -> 0x1000 + 5 + 0xffb
     CHECK(decode(call, sizeof call, 0x1000, i));
     CHECK(i.flow == Flow::Call && i.direct && i.target == 0x2000);
