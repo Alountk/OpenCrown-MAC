@@ -76,6 +76,13 @@ It starts a local lobby and two game copies (keyboard and mouse in one, gamepad 
 
 The fork numbers its releases `<upstream version>-mac.<n>` (for example `1.1-mac.1`, tag `v1.1-mac.1`) and lists them in [CHANGELOG.md](CHANGELOG.md). The revision lives in `OPENCROWN_MAC_REVISION` (`linux-port/CMakeLists.txt`); `OPENCROWN_VERSION` stays upstream's, so merging upstream keeps working.
 
+Releases are made by hand (the repository is private, and macOS runners are not worth the minutes):
+
+1. Raise `OPENCROWN_MAC_REVISION` and add its entry to `docs/CHANGELOG.md`, in a pull request merged into `main`.
+2. On an up-to-date `main`: `git tag v<upstream>-mac.<n>` and `git push origin <tag>`.
+3. `cd linux-port && sh packaging/make-app-mac.sh` writes `dist/OpenCrown-<upstream>-mac.<n>.dmg`.
+4. `gh release create <tag> dist/OpenCrown-<upstream>-mac.<n>.dmg -R Alountk/opencrown-mac -t "OpenCrown <upstream>-mac.<n>" -F <notes>`, with the changelog entry as notes.
+
 ## Keeping up with upstream
 
 The remotes are `origin` (this fork) and `upstream` (Nezara/OpenCrown-PC). **Never push or open a pull request to `upstream`.**
