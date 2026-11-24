@@ -23,9 +23,21 @@ Progress and open items are tracked in [ROADMAP.md](ROADMAP.md).
 cd linux-port
 ./play-mac.sh /path/to/your/dump/CUSA10454          # the folder holding eboot.bin
 ./play-mac.sh /path/to/eboot.bin --fullscreen       # extra options go to dcp_run
+./play-mac.sh /path/to/game.pkg                     # your own fake PKG: unpacked once, then reused
 ```
 
 The first run recompiles your dump and builds the game (a few minutes); later runs take seconds, until the dump or the recompiler changes. Generated code lives in `~/Library/Application Support/OpenCrown/build` (override with `DCP_WORK_DIR`; the script refuses a folder inside a git repository). Saves, settings and logs are in `~/Library/Application Support/OpenCrown/`.
+
+## Installing from the PKG
+
+`play-mac.sh` also takes your fake `.pkg` (the one you would otherwise extract by hand). `dcp_pkg`, a small program built with the
+tools, unpacks it once into `~/Library/Application Support/OpenCrown/game` (about 6 GB) and later runs reuse that folder. To keep it
+on another disk set `DCP_GAME_DIR=/Volumes/Other/DragonsCrown`. The package is unpacked beside the destination under a `.partial` name
+and renamed only when complete, so a cancelled run leaves no half install. Only fake packages work; packages encrypted for a console
+are refused. `dcp_pkg info <file.pkg>` lists what is inside. Unpacked, the game files match a hand-made dump (checked: the eboot, the
+modules and both CPK files are identical; a few `sce_sys` metadata files differ and nothing reads them).
+
+`dcp_pkg` is GPL-2.0-or-later code (from shadPS4) and runs as its own process; see `linux-port/tools/dcp_pkg/README.md` and `NOTICE.md`.
 
 ## The launcher on macOS
 
