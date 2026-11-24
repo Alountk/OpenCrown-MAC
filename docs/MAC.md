@@ -82,6 +82,15 @@ To compare runs (OpenGL against Metal, before and after a change) with the same 
 
 A replay can drift from the recording, because the game's state depends on timing (see above). Measured on a 7 minute route (title, town, a quest), two OpenGL replays of the same script agreed with each other only early on (20% of the pixels differed at vblank 3000, 2-4% at 10000 and 20000) and were on different screens by vblank 27400 (86%); neither followed the recording, which paused and chose another character. A long scripted route is therefore **not** a reliable benchmark. Use it only to look at frame statistics of one run, never to compare two setups; look at the end of the run to see where it arrived. A single stall of 140 ms shows up as one window near 47 fps.
 
+### Slow frames
+
+With `DCP_STATS=1` the log also names where a hitch went, one line each, so a dip can be traced instead of guessed:
+
+- `slow v<vblank> gap N ms = take + draw + present`: a frame later than 25 ms after the previous one. `take` is the wait for the game thread, `draw` the replay into the device, `present` the swap.
+- `backend v<vblank>`: a replay over 15 ms, with the slowest single draw. `slowpart ...`, `upload ...`, `pipeline ...` and `submit ...` lines show what that draw or the GPU submit was doing.
+
+Measured on Metal (M2 Pro, about 10 minutes of play per run, six runs): most slow frames are one missed vblank (25-33 ms). The ones over 40 ms (6 to 24 per run, 2-3 frames each) come from the game thread (`take`) or from **one** draw taking 40-45 ms inside `Backend::texture()` (`render/backend.cpp`), the lookup of a texture the game has not had uploaded yet. Ruled out: the GPU (a submit never waited on a fence), Metal pipeline creation (7 per session, one of 107 ms), render target creation, and the texture upload itself (6 ms for 4096x4096). `gnm_detile` of a 4096x4096 BC7 takes 5-9 ms on its own (synthetic), so the rest of the 40 ms is in what is not yet timed: `texwatch::protect`, `readable()` or the first reads of the game's memory. That code is shared with the OpenGL renderer.
+
 ### Render device micro-benchmark
 
 `dcp_bench` runs the same render devices the game uses (OpenGL, and SDL GPU, which is Metal on a Mac) on synthetic data, so it needs no game files and gives repeatable numbers:

@@ -3,6 +3,7 @@
 // one program whose uniforms stand in for the game's shader permutations. Targets are kept "top row first" so game
 // UVs sample render targets unchanged.
 #include "backend.h"
+#include <SDL3/SDL_timer.h>
 #include "platform/compat.h"
 
 #include <sys/mman.h>
@@ -529,7 +530,10 @@ struct Backend::Impl {
         }
         if (!r.rt) return;
         if (pick_now) pick(r, raw);
+        const uint64_t tt0 = SDL_GetTicksNS();
         Target& t = target(r.rt, int(r.rt_w), int(r.rt_h));
+        if (const double ms = double(SDL_GetTicksNS() - tt0) / 1e6; ms > 3.0 && std::getenv("DCP_STATS"))
+            std::fprintf(stderr, "slowpart target %dx%d (rt %llx): %.1f ms\n", t.w, t.h, (unsigned long long)r.rt, ms);
         Draw& d = cur;
         d.target = t.tex, d.tw = t.w, d.th = t.h;
         d.prim = prim;
@@ -541,10 +545,13 @@ struct Backend::Impl {
             d.sc[0] = x0, d.sc[1] = y0, d.sc[2] = x1 - x0, d.sc[3] = y1 - y0;
         }
         d.blend = blend(r.blend);
+        const uint64_t tx0 = SDL_GetTicksNS();
         TexId tex = (r.tex[0][0] || r.tex[0][1]) ? texture(r.tex[0]) : 0;
         int mask_uv = 0;
         TexId tex1 = 0;
         if ((r.cls == Cls::Sprite || r.cls == Cls::X1 || r.cls == Cls::X2) && (r.tex[1][0] || r.tex[1][1])) tex1 = texture(r.tex[1]);
+        if (const double ms = double(SDL_GetTicksNS() - tx0) / 1e6; ms > 3.0 && std::getenv("DCP_STATS"))
+            std::fprintf(stderr, "slowpart texture lookup/decode: %.1f ms (tex %u, tex1 %u)\n", ms, unsigned(tex), unsigned(tex1));
         int fl = flags_for(r, tex != 0, tex1 != 0, &mask_uv) & ~off_mask;
         if (logged_prog.insert(uint64_t(r.cls) << 56 | uint64_t(r.vs & 0xff) << 48 | uint64_t(r.ps & 0xff) << 40 | r.blend).second)
             std::fprintf(stderr, "render: first %s vs%d ps%d blend %08x flags 0x%x mask%d at vblank %llu\n", cls_name(r.cls), r.vs,
@@ -763,14 +770,24 @@ void Backend::draw(const Frame& f) {
         m.ab_vblank = -2;
         m.ab_on_pending = true;
     }
+    const uint64_t tb0 = SDL_GetTicksNS();
     m.dev->begin_frame();
     std::map<uint64_t, int> per_rt;
+    double worst_draw = 0;
+    size_t worst_i = 0;
     for (const auto& d : f.draws) {
+        const uint64_t td = SDL_GetTicksNS();
         m.draw_one(*d);
+        if (const double ms = double(SDL_GetTicksNS() - td) / 1e6; ms > worst_draw) worst_draw = ms, worst_i = m.pick_index;
         ++m.pick_index;
         ++per_rt[d->rt];
     }
+    const uint64_t tb1 = SDL_GetTicksNS();
     m.dev->end_frame();
+    if (const double tot = double(SDL_GetTicksNS() - tb0) / 1e6; tot > 15.0 && std::getenv("DCP_STATS"))
+        std::fprintf(stderr, "backend v%llu %.1f ms: draw_one loop %.1f (slowest single draw %.1f ms, #%zu of %zu), end_frame %.1f\n",
+                     (unsigned long long)f.vblank, tot, double(tb1 - tb0) / 1e6, worst_draw, worst_i, f.draws.size(),
+                     double(SDL_GetTicksNS() - tb1) / 1e6);
     if (f.display && m.targets.count(f.display)) m.shown = f.display;
     else {
         int best = -1;  // GUESS until the final copy to the display buffer is understood: busiest target
