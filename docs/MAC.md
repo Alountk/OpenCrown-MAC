@@ -70,6 +70,8 @@ On an Xbox pad the View button takes the place of the PlayStation touchpad click
 - On the character creation screen they differ, but this is not shown to be a recompiler fault. The reference differs from itself only in the random default name. Against it, the arm64 build differs in about 0.9% of the pixels, steady from about vblank 1870: the on-screen keyboard keys are red on arm64 and grey in the reference after the Cross press at vblank 1850. Moving that press by a few vblanks gives three different states (dark, grey, red) in **both** builds, and the reference also shows the red state when nothing is pressed. So the game state there depends on timing, and the two builds run at different speeds. A fixed-vblank script is therefore only reliable up to the title; beyond it, a deterministic clock (game time advancing by vblank) or input driven by what is on screen would be needed.
 - Later frames were compared the same way and are not conclusive.
 
+The recompiler also has a scanner for your dump, `dcp_scan <eboot.bin>` (build target `dcp_scan`): `--indirect --all` lists the 26 computed jumps whose jump table it could not prove, `--targets` adds what each table would hold read at the bound of its check (all entries are already compiled blocks), `--context` prints the blocks around each, and `--show-fn <addr>` prints a whole function. Their output is text derived from your game: read it, do not commit it.
+
 ## Performance checks
 
 To compare runs (OpenGL against Metal, before and after a change) with the same play:

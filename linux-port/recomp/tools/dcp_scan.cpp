@@ -18,7 +18,7 @@ using namespace dcp;
 
 
 int main(int argc, char** argv) {
-    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect [--all] | --show-jmp N | --lift out.cpp]\n"), 2;
+    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect [--all [--context | --targets]] | --show-jmp N | --show-fn ADDR | --lift out.cpp]\n"), 2;
     recomp::LoadedModule mod;
     try { mod = recomp::load_module(argv[1]); }
     catch (const std::exception& e) { return std::fprintf(stderr, "scan: %s\n", e.what()), 1; }
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
             return o.index != recomp::kNoReg ? "[base+index*s+disp]" : "[base+disp]";
         };
         std::map<std::string, size_t> cls;
-        size_t table_blocks = 0, table_fns = 0, resolved = 0, entries = 0, unresolved_idiom = 0;
+        size_t table_blocks = 0, table_fns = 0, resolved = 0, entries = 0, unresolved_idiom = 0, tables_checked = 0, tables_fresh = 0, tables_outside = 0, tables_nobound = 0;
         for (auto& r : ranges) {
             recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
             bool fn_table = false;
@@ -117,6 +117,55 @@ int main(int argc, char** argv) {
                         if (!fn.jump_tables.count(last.addr)) {
                             ++unresolved_idiom;
                             if (unresolved_idiom <= 3 || (argc > 3 && !std::strcmp(argv[3], "--all"))) std::printf("unresolved idiom at 0x%llx (fn 0x%llx)\n", (unsigned long long)last.addr, (unsigned long long)r.start);
+                            if (argc > 4 && !std::strcmp(argv[3], "--all") && !std::strcmp(argv[4], "--targets")) {
+                                // What the unresolved table would hold if the bounds check in the block before is taken at its word: the
+                                // entries, and whether each is already a block of this function (reached some other way) or not.
+                                uint64_t table = 0, count = 0;
+                                for (auto& in : b.insns) if (in.mnemonic == "lea" && in.ops[1].base == recomp::kRip) table = in.ops[1].rip_target;
+                                for (auto& [pa, pb] : fn.blocks) {
+                                    bool leads = false;
+                                    for (uint64_t sc : pb.succ) leads |= sc == a;
+                                    const size_t n = pb.insns.size();
+                                    if (!leads || n < 2) continue;
+                                    const recomp::Insn& j = pb.insns[n - 1];
+                                    const bool above = j.mnemonic == "ja" || j.mnemonic == "jnbe" || j.mnemonic == "jg" || j.mnemonic == "jnle";
+                                    size_t m = n - 1;  // the cmp may be followed by moves, which leave the flags alone
+                                    while (m > 0 && (pb.insns[m - 1].mnemonic.compare(0, 3, "mov") == 0 || pb.insns[m - 1].mnemonic == "lea")) --m;
+                                    if (m == 0) continue;
+                                    const recomp::Insn& c = pb.insns[m - 1];
+                                    if (above && c.mnemonic == "cmp" && c.nops == 2 && c.ops[1].kind == recomp::OpKind::Imm) count = uint64_t(c.ops[1].imm) + 1;
+                                }
+                                size_t known = 0, fresh = 0, outside = 0;
+                                std::string fresh_list;
+                                for (uint64_t k = 0; k < count && table; ++k) {
+                                    int32_t rel;
+                                    std::memcpy(&rel, img.data() + table + 4 * k, 4);
+                                    const uint64_t t = table + uint64_t(int64_t(rel));
+                                    if (t < r.start || t >= r.start + r.size) ++outside;
+                                    else if (fn.blocks.count(t)) ++known;
+                                    else ++fresh, fresh_list += " 0x" + [&] { char h[24]; std::snprintf(h, sizeof h, "%llx", (unsigned long long)t); return std::string(h); }();
+                                }
+                                ++tables_checked, tables_fresh += fresh != 0, tables_outside += outside != 0, tables_nobound += count == 0;
+                                std::printf("  table 0x%llx  entries %llu: already blocks %zu, NOT blocks %zu, outside the function %zu%s\n",
+                                            (unsigned long long)table, (unsigned long long)count, known, fresh, outside, fresh_list.c_str());
+                            }
+                            if (argc > 4 && !std::strcmp(argv[3], "--all") && !std::strcmp(argv[4], "--context")) {
+                                // The idiom block and the blocks that reach it (two levels), to see why the table was not recovered.
+                                // Text derived from the game: read it, do not paste it into the repo.
+                                std::set<uint64_t> seen{a};
+                                std::vector<uint64_t> level{a};
+                                for (int depth = 0; depth < 3 && !level.empty(); ++depth) {
+                                    std::vector<uint64_t> next;
+                                    for (uint64_t ba : level) {
+                                        std::printf("  %s block 0x%llx\n", depth == 0 ? "idiom" : "pred", (unsigned long long)ba);
+                                        for (auto& in : fn.blocks.at(ba).insns) std::printf("     0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+                                        for (auto& [pa, pb] : fn.blocks)
+                                            for (uint64_t sc : pb.succ)
+                                                if (sc == ba && seen.insert(pa).second) next.push_back(pa);
+                                    }
+                                    level = next;
+                                }
+                            }
                         }
                     }
                 }
@@ -142,6 +191,9 @@ int main(int argc, char** argv) {
         for (auto& [k, n] : cls) std::printf("%8zu %s\n", n, k.c_str());
         std::printf("blocks ending in the lea/movsxd/add/jmp reg jump-table idiom: %zu (in %zu functions)\n", table_blocks, table_fns);
         std::printf("jump tables resolved: %zu (%zu entries); idiom blocks left unresolved: %zu\n", resolved, entries, unresolved_idiom);
+        if (tables_checked)
+            std::printf("unresolved tables read at the bound of their check: %zu; with an entry that is not a block of the function: %zu; with an entry outside it: %zu; no bound found: %zu\n",
+                        tables_checked, tables_fresh, tables_outside, tables_nobound);
     }
     if (argc > 3 && !std::strcmp(argv[2], "--show-jmp")) {
         // Prints the instructions leading to the first N `jmp reg` blocks (and the blocks that branch into them), to study
@@ -157,6 +209,18 @@ int main(int argc, char** argv) {
                 for (auto& [pa, pb] : fn.blocks)
                     for (uint64_t sc : pb.succ)
                         if (sc == a) for (auto& in : pb.insns) std::printf("   pred 0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+                for (auto& in : b.insns) std::printf("   0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
+            }
+        }
+    }
+    if (argc > 3 && !std::strcmp(argv[2], "--show-fn")) {
+        // Every instruction of the function starting at the given address, by block. Text derived from the game: read it, do not commit it.
+        const uint64_t at = std::strtoull(argv[3], nullptr, 0);
+        for (auto& r : ranges) {
+            if (r.start != at) continue;
+            recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+            for (auto& [a, b] : fn.blocks) {
+                std::printf("-- block 0x%llx\n", (unsigned long long)a);
                 for (auto& in : b.insns) std::printf("   0x%llx: %s\n", (unsigned long long)in.addr, in.text.c_str());
             }
         }
