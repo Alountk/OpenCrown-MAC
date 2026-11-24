@@ -9,13 +9,33 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 
 namespace dcp::skip_warning {
 
 class Warning {
 public:
-    // ASCII and '\n' only, no '%': the game runs the text through vsnprintf as a format.
-    static const char* text() {
+    // The question text in the game's language (`lang` = $DCP_LANGUAGE: en / fr / es / de / it; anything else is English).
+    // UTF-8 as the game's own sheets are (their accents are in its font) and '\n', no '%': the game runs the text through
+    // vsnprintf as a format. The English one is ASCII only. Each fits the 0xf0 bytes of the x86 relay page.
+    static const char* text(const char* lang = nullptr) {
+        auto is = [&](const char* c) { return lang && lang[0] == c[0] && lang[1] == c[1] && !lang[2]; };
+        if (is("es"))
+            return "Sin el salto, este personaje no puede jugar en línea\n"
+                   "hasta terminar la primera mitad de la historia.\n"
+                   "¿Saltar a la recogida de talismanes? (Empiezas en LV15)";
+        if (is("fr"))
+            return "Sans le saut, ce personnage ne peut pas jouer en ligne\n"
+                   "avant la fin de la première moitié de l'histoire.\n"
+                   "Passer à la collecte des talismans ? (Début au LV15)";
+        if (is("de"))
+            return "Ohne das Überspringen kann dieser Charakter erst nach\n"
+                   "der ersten Hälfte der Geschichte online spielen.\n"
+                   "Zur Talisman-Suche springen? (Start mit LV15)";
+        if (is("it"))
+            return "Senza il salto, questo personaggio non può giocare online\n"
+                   "finché non finisce la prima metà della storia.\n"
+                   "Saltare alla raccolta dei talismani? (Inizi al LV15)";
         return "Without the skip, this character can't play online\n"
                "until the first half of the story is finished.\n"
                "Skip to the talisman collecting? (Player starts at LV15)";
@@ -37,7 +57,7 @@ public:
 
     const char* on_lookup(uint32_t id) {
         if (id != kQuestionId || !text_due_.exchange(false)) return nullptr;
-        return text();
+        return text(std::getenv("DCP_LANGUAGE"));
     }
 
 private:

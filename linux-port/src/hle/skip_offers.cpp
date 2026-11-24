@@ -118,7 +118,8 @@ void install_warning(uint8_t* base) {
     const uint64_t b64 = reinterpret_cast<uint64_t>(base);
     uint8_t* flags = page;            // [0] text_due, [1] in_second
     char* text = reinterpret_cast<char*>(page + 0x10);
-    std::memcpy(text, skip_warning::Warning::text(), std::strlen(skip_warning::Warning::text()) + 1);
+    const char* warn = skip_warning::Warning::text(std::getenv("DCP_LANGUAGE"));
+    std::memcpy(text, warn, std::strlen(warn) + 1);
     uint8_t *L = page + 0x100, *B = page + 0x180, *Y = page + 0x200;
     const uint64_t f64 = reinterpret_cast<uint64_t>(flags);
 

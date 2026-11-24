@@ -41,6 +41,13 @@ int main() {
 
     // The text goes through the game's vsnprintf: no conversion character, ASCII and newlines only.
     for (const char* p = Warning::text(); *p; ++p) CHECK(*p != '%' && (*p == '\n' || (*p >= 0x20 && *p < 0x7f)));
+    // Each language has its own text, none with a conversion character, and one that fits the relay page.
+    const char* langs[] = {"fr", "es", "de", "it"};
+    for (const char* l : langs) {
+        const char* t = Warning::text(l);
+        CHECK(std::strcmp(t, Warning::text()) != 0 && std::strlen(t) < 0xf0 && !std::strchr(t, '%'));
+    }
+    CHECK(std::strcmp(Warning::text("xx"), Warning::text()) == 0);  // unknown language: English
     if (g_fail) return 1;
     std::puts("skip_warning: all tests passed");
     return 0;
