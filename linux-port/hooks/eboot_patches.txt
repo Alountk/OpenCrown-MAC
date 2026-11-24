@@ -35,3 +35,7 @@ site 464b53  e898c8baff            skip   # fight lock: camera lease, left edge
 site 464b65  e9a6c8baff            ret    # fight lock: camera lease, right edge (a tail jump)
 site 0f3ed8  e873d5f1ff            skip   # fight lock: clamp
 site 0f3f5e  e8edd4f1ff            skip
+
+# msg_trace (DCP_TRACE_MSG=1), see src/hle/msg_trace.cpp: the entries of the UI text setters (id in esi / edx); they only log
+site 5915d0  55                    -   # SetText(id)
+site 591730  55                    -   # SetText(slot, id)

@@ -34,6 +34,7 @@
 #include "hle/ime.h"
 #include "hle/confirm_button.h"
 #include "hle/skip_offers.h"
+#include "hle/msg_trace.h"
 #include "hle/own_camera.h"
 #ifndef __x86_64__
 #include "dcp_abi.h"
@@ -544,6 +545,7 @@ int main(int argc, char** argv) {
         install_probes(reinterpret_cast<uint64_t>(eb->img.base));
         dcp::skip_offers::install(eb->img.base);  // story / tutorial skip questions for every new hero (skip_offers.h)
         dcp::confirm_button::install(eb->img.base);  // DCP_CONFIRM=circle: Japanese button layout (confirm_button.h)
+        dcp::msg_trace::install(eb->img.base);    // DCP_TRACE_MSG=1: which message ids the game asks for, and from where
         dcp::own_camera::install(eb->img.base);   // separate cameras online (x86: byte relays; recompiled: site hooks)
 #ifndef DCP_HAVE_RENDER
         if (render) throw std::runtime_error("--render needs a build with -DDCP_RENDER=ON (the default)");
