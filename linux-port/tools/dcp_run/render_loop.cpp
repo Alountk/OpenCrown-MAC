@@ -213,6 +213,7 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
     // F1: frame stats in the window title (game flips/s, mean flip interval, host replay+present cost per frame).
     const bool stats_log = std::getenv("DCP_STATS") != nullptr;  // stats on from the start, also written to stderr
     bool stats = stats_log;
+    uint64_t last_flip_ns = 0, t_draw0 = 0, t_draw = 0, t_present = 0;
     uint64_t stat_t0 = SDL_GetTicksNS(), stat_flips = 0, stat_work = 0, stat_draws = 0;
     for (;;) {
         SDL_Event e;
@@ -285,7 +286,9 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
                 std::fprintf(stderr, "touch: test %c %.3f %.3f at vblank %llu\n", t.kind, t.x, t.y, (unsigned long long)f->vblank);
             }
             be.set_prompt_kbm(o.input ? o.input->kbm_active() : test_dev.kbm());
+            t_draw0 = SDL_GetTicksNS();
             be.draw(*f);
+            t_draw = SDL_GetTicksNS();
             if (next_shot < o.shots.size() && f->vblank >= o.shots[next_shot].first) {
                 int w, h;
                 auto rgb = be.read_rgb(&w, &h);
@@ -322,11 +325,19 @@ int run_render_loop(const RenderOptions& o, pthread_t game_thread, void (*finish
             }
             if (shown && (SDL_GetWindowFlags(win) & SDL_WINDOW_MINIMIZED)) shown = false;  // GL swaps do not wait then
             presented = presented || shown;
+            t_present = SDL_GetTicksNS();
             if (locked && shown) dcp::hle::display_vblank();
         }
         if (stats && f) {
             uint64_t now = SDL_GetTicksNS();
             ++stat_flips, stat_work += now - work0, stat_draws += f->draws.size();
+            // One line per frame later than 25 ms after the previous one: where that time went. "take" is the wait for the
+            // game thread's frame, "draw" the replay into the device, "present" the swap (it waits for the display).
+            if (stats_log && last_flip_ns && now - last_flip_ns > 25000000ull)
+                std::fprintf(stderr, "slow v%llu gap %.1f ms = take %.1f + draw %.1f + present %.1f ms, %zu draws\n",
+                             (unsigned long long)f->vblank, double(now - last_flip_ns) / 1e6, double(work0 - last_flip_ns) / 1e6,
+                             double(t_draw - t_draw0) / 1e6, double(t_present - t_draw) / 1e6, f->draws.size());
+            last_flip_ns = now;
             if (now - stat_t0 >= 500000000ull) {
                 double sec = double(now - stat_t0) / 1e9;
                 char t[160];

@@ -41,6 +41,7 @@ Tick a box only after the outcome was observed.
 - [x] First visible frame on arm64 (the "Create save data?" prompt); the black frames were BC7 textures, which Apple's OpenGL rejects (CPU BC7 decoder)
 - [x] Input: answer the prompts and reach the title and the menu (keyboard and gamepad, checked by hand)
 - [x] Metal render backend: the SDL GPU device runs on Metal with MSL shaders generated from the SPIR-V; `auto` picks it on a Mac, OpenGL stays as `--renderer gl` and as the fallback. Checked by hand (smoother than OpenGL, no abort), FSR and sharpen start and show on screen; frame stats and `dcp_bench` in `docs/MAC.md`. Not checked: pixels in a level against OpenGL (only the first screens, identical up to animation), M5 and lower-end Macs
+- [ ] Frame dips on Metal (a few per minute, 2-3 frames each): traced to one texture lookup taking 40-45 ms in `Backend::texture()` and to the game thread; the cause inside the lookup is not found. What is ruled out and how to read the log: `docs/MAC.md`, "Slow frames". Left open on purpose (a fix would touch `texwatch`, shared with OpenGL), in case a later change makes it unnecessary
 - [x] Performance measured (M2 Pro, 90 s of play): 60 fps with ample headroom; main game thread spent 60% of its time in a yield busy-wait, now throttled (CPU 142 s -> 80 s per 91 s of play, same pacing)
 - [ ] Performance: remaining hot spots if lower-end Macs need them (guest code on the main thread ~25% of a core, render thread ~33%)
 

@@ -201,6 +201,13 @@ public:
 
     TexId upload(TexId reuse, TexFormat f, int w, int h, const void* data, size_t n, bool) override {
         if (w <= 0 || h <= 0 || n < level_size(f, w, h)) return 0;
+        const uint64_t up_t0 = SDL_GetTicksNS();
+        struct Log {
+            uint64_t t0; int w, h, f; bool fresh; ~Log() {
+                const double ms = double(SDL_GetTicksNS() - t0) / 1e6;
+                if (ms > 3.0 && std::getenv("DCP_STATS"))
+                    std::fprintf(stderr, "upload %dx%d format %d %s: %.1f ms\n", w, h, f, fresh ? "new texture" : "reused", ms);
+            } } up_log{up_t0, w, h, int(f), !reuse || !texs_.count(reuse)};
         TexId id = reuse;
         if (!id || !texs_.count(id)) {
             SDL_GPUTexture* t = texture(sdl_format(f), w, h, SDL_GPU_TEXTUREUSAGE_SAMPLER);
@@ -478,7 +485,10 @@ private:
         pi.rasterizer_state.enable_depth_clip = true;  // with the VS z remap: clips exactly what GL clips
         pi.target_info.color_target_descriptions = &ct;
         pi.target_info.num_color_targets = 1;
+        const uint64_t t0 = SDL_GetTicksNS();
         SDL_GPUGraphicsPipeline* p = SDL_CreateGPUGraphicsPipeline(dev_, &pi);
+        if (std::getenv("DCP_STATS"))
+            std::fprintf(stderr, "pipeline %08x created in %.1f ms\n", key, double(SDL_GetTicksNS() - t0) / 1e6);
         if (!p) std::fprintf(stderr, "render: SDL GPU pipeline %08x: %s\n", key, SDL_GetError());
         pipes_[key] = p;
         return p;
@@ -521,6 +531,9 @@ private:
 
     void submit() {
         if (recs_.empty() && ups_.empty()) return;
+        const uint64_t sub_t0 = SDL_GetTicksNS();
+        const size_t sub_ups = ups_.size(), sub_bytes = staging_.size(), sub_recs = recs_.size();
+        double sub_wait = 0;
         SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(dev_);
         if (!cmd) {
             std::fprintf(stderr, "render: SDL GPU command buffer: %s\n", SDL_GetError());
@@ -631,10 +644,15 @@ private:
         SDL_GPUFence* f = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
         if (f) fences_.push_back(f);
         while (fences_.size() > 2) {
+            const uint64_t w0 = SDL_GetTicksNS();
             SDL_WaitForGPUFences(dev_, true, &fences_.front(), 1);
+            sub_wait += double(SDL_GetTicksNS() - w0) / 1e6;
             SDL_ReleaseGPUFence(dev_, fences_.front());
             fences_.erase(fences_.begin());
         }
+        if (const double ms = double(SDL_GetTicksNS() - sub_t0) / 1e6; ms > 8.0 && std::getenv("DCP_STATS"))
+            std::fprintf(stderr, "submit %.1f ms (gpu fence wait %.1f) | %zu uploads, %zu KB, %zu passes\n", ms, sub_wait, sub_ups,
+                         sub_bytes / 1024, sub_recs);
     }
 
     SDL_GPUDevice* dev_;
