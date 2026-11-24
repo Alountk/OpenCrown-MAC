@@ -18,7 +18,7 @@ using namespace dcp;
 
 
 int main(int argc, char** argv) {
-    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --indirect [--all [--context | --targets]] | --show-jmp N | --show-fn ADDR | --lift out.cpp]\n"), 2;
+    if (argc < 2) return std::fprintf(stderr, "usage: dcp_scan <module> [--hist | --find HEX.. | --xref TEXT | --indirect [--all [--context | --targets]] | --show-jmp N | --show-fn ADDR | --callers ADDR | --refs LO HI | --lift out.cpp]\n"), 2;
     recomp::LoadedModule mod;
     try { mod = recomp::load_module(argv[1]); }
     catch (const std::exception& e) { return std::fprintf(stderr, "scan: %s\n", e.what()), 1; }
@@ -213,11 +213,73 @@ int main(int argc, char** argv) {
             }
         }
     }
-    if (argc > 3 && !std::strcmp(argv[2], "--show-fn")) {
-        // Every instruction of the function starting at the given address, by block. Text derived from the game: read it, do not commit it.
+    if (argc > 3 && !std::strcmp(argv[2], "--find")) {
+        // Byte pattern in the code of every function, hex pairs with xx (or ??) as a wildcard ("39 xx 14 76"): prints the function and the
+        // address of each hit. Text derived from the game: read it, do not commit it.
+        std::vector<int> pat;
+        for (int a = 3; a < argc; ++a) pat.push_back((!std::strcmp(argv[a], "??") || !std::strcmp(argv[a], "xx")) ? -1 : int(std::strtol(argv[a], nullptr, 16)));
+        std::map<uint64_t, int> per_fn;
+        for (auto& r : ranges)
+            for (uint64_t i = r.start; i + pat.size() <= r.start + r.size && i + pat.size() <= img.size(); ++i) {
+                bool ok = true;
+                for (size_t k = 0; ok && k < pat.size(); ++k) ok = pat[k] < 0 || img[i + k] == pat[k];
+                if (ok) per_fn[r.start]++, std::printf("function 0x%llx hit at 0x%llx\n", (unsigned long long)r.start, (unsigned long long)i);
+            }
+        std::printf("%zu functions\n", per_fn.size());
+        return 0;
+    }
+    if (argc > 3 && !std::strcmp(argv[2], "--xref")) {
+        // Where a string of the game is used: every place of a function that holds a rip-relative displacement reaching it
+        // (lea / mov, with 0, 1 or 4 bytes of immediate after it). A byte scan, so a hit can be a false positive. Text derived
+        // from the game: read it, do not commit it.
+        const std::string needle = argv[3];
+        for (size_t p = 0; p + needle.size() <= img.size(); ++p) {
+            if (std::memcmp(&img[p], needle.data(), needle.size()) != 0) continue;
+            std::printf("string at 0x%zx\n", p);
+            for (auto& r : ranges) {
+                for (uint64_t i = r.start; i + 4 <= r.start + r.size && i + 4 <= img.size(); ++i) {
+                    int32_t disp;
+                    std::memcpy(&disp, &img[i], 4);
+                    for (int extra : {0, 1, 4})
+                        if (int64_t(i) + 4 + extra + disp == int64_t(p))
+                            std::printf("  function 0x%llx, displacement at 0x%llx (+%d)\n", (unsigned long long)r.start, (unsigned long long)i, extra);
+                }
+            }
+        }
+        return 0;
+    }
+    if (argc > 4 && !std::strcmp(argv[2], "--refs")) {
+        // Instructions with a RIP-relative operand [0xADDR] inside [LO, HI). Output is derived from the game: do not commit it.
+        const uint64_t lo = std::strtoull(argv[3], nullptr, 0), hi = std::strtoull(argv[4], nullptr, 0);
+        for (auto& r : ranges) {
+            recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+            for (auto& [a, b] : fn.blocks)
+                for (auto& in : b.insns) {
+                    const size_t p = in.text.find("[0x");
+                    if (p == std::string::npos) continue;
+                    const uint64_t v = std::strtoull(in.text.c_str() + p + 1, nullptr, 16);
+                    if (v >= lo && v < hi && in.text.find("lea") == 0)
+                        std::printf("fn 0x%llx  0x%llx: %s\n", (unsigned long long)r.start, (unsigned long long)in.addr, in.text.c_str());
+                }
+        }
+        return 0;
+    }
+    if (argc > 3 && !std::strcmp(argv[2], "--callers")) {
+        // Functions that call or tail-jump to the given address. Output is derived from the game: do not commit it.
         const uint64_t at = std::strtoull(argv[3], nullptr, 0);
         for (auto& r : ranges) {
-            if (r.start != at) continue;
+            recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
+            if (fn.calls.count(at)) std::printf("call  from function 0x%llx size 0x%llx\n", (unsigned long long)r.start, (unsigned long long)r.size);
+            for (uint64_t t : fn.tail_jumps) if (t == at) std::printf("jump  from function 0x%llx size 0x%llx\n", (unsigned long long)r.start, (unsigned long long)r.size);
+        }
+        return 0;
+    }
+    if (argc > 3 && !std::strcmp(argv[2], "--show-fn")) {
+        // Every instruction of the function that contains the given address, by block. Text derived from the game: read it, do not commit it.
+        const uint64_t at = std::strtoull(argv[3], nullptr, 0);
+        for (auto& r : ranges) {
+            if (at < r.start || at >= r.start + r.size) continue;
+            std::printf("function 0x%llx size 0x%llx\n", (unsigned long long)r.start, (unsigned long long)r.size);
             recomp::Function fn = recomp::discover_function(img.data(), img.size(), 0, r.start, r.size);
             for (auto& [a, b] : fn.blocks) {
                 std::printf("-- block 0x%llx\n", (unsigned long long)a);
