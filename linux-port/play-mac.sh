@@ -45,6 +45,12 @@ case "$arg" in
         # Unpack next to the destination (same disk) and rename at the end: a cancelled run leaves no half install.
         stage=$install.partial
         rm -rf "$stage"
+        # Say so before starting if the disk cannot hold it (the package size plus 1 GB of margin).
+        need=$("$pkgtool" info "$arg" 2>/dev/null | sed -n 's/^files: [0-9]*, \([0-9]*\) bytes$/\1/p')
+        free=$(df -k "$(dirname "$install")" | awk 'NR==2 { print $4 }')
+        if [ -n "$need" ] && [ -n "$free" ] && [ $((free / 1024)) -lt $((need / 1048576 + 1024)) ]; then
+          die "not enough free space for $install: needs about $((need / 1048576 + 1024)) MB, $((free / 1024)) MB free (set DCP_GAME_DIR, or the launcher's unpack folder, to a bigger disk)"
+        fi
         "$pkgtool" extract "$arg" "$stage" | sed -n 's/^progress \([0-9]*\) \([0-9]*\)$/\1 \2/p' | awk '{ p = int($1 * 100 / $2); if (p != l) { printf "play-mac: unpacking %d%%\n", p; l = p } }'
         [ -f "$stage/eboot.bin" ] && [ -f "$stage/sce_module/libc.prx" ] || { rm -rf "$stage"; die "the package did not unpack (is it a fake PKG? see dcp_pkg info)"; }
         rm -rf "$install"
