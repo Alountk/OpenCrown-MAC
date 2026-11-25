@@ -157,7 +157,8 @@ void poll_openers() {
 // ---- launcher.ini ----
 
 struct Settings {
-    std::string dump;
+    std::string dump;     // the game folder, or the player's own fake .pkg (unpacked on first Play)
+    std::string install;  // where a .pkg is unpacked; empty = <user data>/game (play-mac.sh DCP_GAME_DIR)
     std::string saves;  // save root (holds SAVEDATA00); empty = <user dir>/saves. Passed to dcp_run as DCP_SAVE_ROOT
     bool saves_chosen = false;  // the user picked the save folder (or the default) once; false = ask on start
     bool fullscreen = false;
@@ -190,6 +191,7 @@ void load_settings(const std::string& path, Settings& s) {
         if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
         std::string k = trim(line.substr(0, eq)), v = trim(line.substr(eq + 1));
         if (k == "dump") s.dump = v;
+        else if (k == "install") s.install = v;
         else if (k == "saves") s.saves = v, s.saves_chosen = s.saves_chosen || !v.empty();
         else if (k == "saves_chosen") s.saves_chosen = s.saves_chosen || v == "1" || v == "true";
         else if (k == "fullscreen") s.fullscreen = v == "1" || v == "true";
@@ -216,7 +218,7 @@ void load_settings(const std::string& path, Settings& s) {
 void save_settings(const std::string& path, const Settings& s) {
     std::ofstream o(path);
     o << "# OpenCrownPC Launcher settings\n"
-      << "dump = " << s.dump << "\nsaves = " << s.saves
+      << "dump = " << s.dump << "\ninstall = " << s.install << "\nsaves = " << s.saves
       << "\nsaves_chosen = " << (s.saves_chosen ? "true" : "false") << "\nuhd = " << (s.uhd ? "true" : "false")
       << "\nrenderer = " << s.renderer << "\nvsync = " << (s.vsync ? "true" : "false")
       << "\nfsr = " << (s.fsr ? "true" : "false") << "\nsharpening = " << s.sharpening << "\nrender_res = " << s.render_res
@@ -441,6 +443,38 @@ bool dump_ok(const std::vector<Check>& v) {
     return true;
 }
 
+// A fake .pkg can stand in for the dump folder: play-mac.sh unpacks it once into the install folder and reuses that.
+bool is_pkg(const std::string& path) {
+    std::string e = path.size() > 4 ? path.substr(path.size() - 4) : "";
+    for (char& c : e) c = char(std::tolower((unsigned char)c));
+    std::error_code ec;
+#ifdef __APPLE__
+    return e == ".pkg" && std::filesystem::is_regular_file(path, ec);
+#else
+    (void)ec;
+    return false;  // only play-mac.sh unpacks packages
+#endif
+}
+
+std::string default_install_dir() {
+    const char* h = std::getenv("HOME");
+    return std::string(h && *h ? h : "") + "/Library/Application Support/OpenCrown/game";
+}
+
+std::string install_dir(const Settings& s) { return s.install.empty() ? default_install_dir() : s.install; }
+
+// The folder the game files are read from: the dump, or for a package the install folder once it holds an unpacked game.
+std::string game_folder(const Settings& s) {
+    if (!is_pkg(s.dump)) return s.dump;
+    return find_ci(install_dir(s), "eboot.bin").empty() ? "" : install_dir(s);
+}
+
+std::vector<Check> validate_game(const Settings& s) {
+    if (!is_pkg(s.dump)) return validate_dump(s.dump);
+    if (!game_folder(s).empty()) return validate_dump(game_folder(s));
+    return {{true, true, "Game package found: it is unpacked into " + install_dir(s) + " the first time you press Play (about 6 GB)."}};
+}
+
 // ---- game process ----
 
 #ifdef __APPLE__
@@ -504,7 +538,8 @@ std::string mac_source_dir() {
 #endif
 
 bool start_game(Game& g, const Settings& s, const std::string& user, const std::string& log_path) {
-    std::string eboot = find_ci(s.dump, "eboot.bin");
+    const bool pkg = is_pkg(s.dump);
+    std::string eboot = pkg ? s.dump : find_ci(s.dump, "eboot.bin");
     if (eboot.empty()) { g.error = "eboot.bin not found in " + s.dump; return false; }
     std::vector<std::string> flags = {"--render", "--window"};
     if (s.fullscreen) flags.push_back("--fullscreen");
@@ -541,6 +576,7 @@ bool start_game(Game& g, const Settings& s, const std::string& user, const std::
 
     // Custom save folder: the game's DCP_SAVE_ROOT override, set in our environment (inherited by the child).
     set_env("DCP_SAVE_ROOT", s.saves);
+    set_env("DCP_GAME_DIR", pkg ? s.install : "");
     set_env("DCP_LANGUAGE", s.language);
     // Same user dir as ours, whatever the save folder is: the game reads input.ini and identity.ini from it (without
     // this it uses the save folder's parent, so a custom save folder would mean another online account than ours).
@@ -606,7 +642,7 @@ void poll_game(Game& g, const std::string& log_path) {
 std::mutex g_pick_mu;
 std::string g_picked;
 bool g_have_pick = false;
-intptr_t g_pick_target = 0;  // 0 = dump folder, 1 = saves folder
+intptr_t g_pick_target = 0;  // 0 = dump folder, 1 = saves folder, 2 = package (.pkg file), 3 = install folder for a package
 bool g_pick_failed = false;  // no dialog backend (neither xdg-desktop-portal nor zenity): type the path instead
 std::string g_pick_error;
 
@@ -1902,7 +1938,7 @@ int main(int argc, char** argv) {
     Game game;
     // --play: the Play button without the window. Waits so Steam sees the game running; on anything that needs
     // the player it falls through to the launcher, which then shows the reason (Play bar, log popup).
-    if (play_now && !selftest && set.saves_chosen && dump_ok(validate_dump(set.dump)) &&
+    if (play_now && !selftest && set.saves_chosen && dump_ok(validate_game(set)) &&
         dcp::save_check::bad_saves(std::filesystem::path(set.saves.empty() ? saves : set.saves)).empty()) {
         if (!start_game(game, set, user, log_path)) game.failed = true;
         else {
@@ -2036,7 +2072,7 @@ int main(int argc, char** argv) {
     std::string pick_msg;          // folder dialog failure, shown on the Game / Save Folder page
     bool type_saves = false;       // Save Folder page shows a path field (after a dialog failure)
     std::string saves_buf;
-    std::vector<Check> checks = validate_dump(set.dump);
+    std::vector<Check> checks = validate_game(set);
     int frames = 0;
     bool quit = false;
     // Gamepad / touch (Steam Deck Game Mode).
@@ -2065,8 +2101,8 @@ int main(int argc, char** argv) {
     const bool input_log = env_on("DCP_LAUNCHER_INPUT_LOG") || script.active();
     auto browse = [&](int target, const std::string& start, bool first_start) {
         if (pick_unavailable || input != Input::Mouse) browser.open(target, start, first_start);
-        else if (target == 1) SDL_ShowOpenFolderDialog(on_folder, reinterpret_cast<void*>(intptr_t(1)), win,
-                                                       start.empty() ? nullptr : start.c_str(), false);
+        else if (target == 1 || target == 3)
+            SDL_ShowOpenFolderDialog(on_folder, reinterpret_cast<void*>(intptr_t(target)), win, start.empty() ? nullptr : start.c_str(), false);
         else SDL_ShowOpenFolderDialog(on_folder, nullptr, win, start.empty() ? nullptr : start.c_str(), false);
     };
     int script_frame = 0, script_page = -1;
@@ -2122,9 +2158,13 @@ int main(int argc, char** argv) {
                 if (g_pick_target == 1) {
                     set.saves = g_picked, set.saves_chosen = true;
                     save_settings(settings_path, set);
+                } else if (g_pick_target == 3) {
+                    set.install = g_picked;
+                    checks = validate_game(set);
+                    save_settings(settings_path, set);
                 } else {
                     set.dump = dump_buf = g_picked;
-                    checks = validate_dump(set.dump);
+                    checks = validate_game(set);
                 }
             }
             if (g_pick_failed) {  // no folder dialog on this desktop: say so, and offer the typed path instead
@@ -2196,7 +2236,7 @@ int main(int argc, char** argv) {
         ImGui::NewFrame();
         touch.apply(input_log);
         bool slider_active = false;
-        art.update(dump_ok(checks) ? set.dump : "", win);
+        art.update(dump_ok(checks) ? game_folder(set) : "", win);
         draw_background(art, io.DisplaySize);
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(io.DisplaySize);
@@ -2349,18 +2389,35 @@ int main(int argc, char** argv) {
                 ImGui::Spacing();
             }
             if (t == 0) {
-                ImGui::TextUnformatted("Personal game dump folder (your own copy; holds eboot.bin and the .CPK data files):");
+                ImGui::TextUnformatted("Game folder (your own copy, already unpacked: eboot.bin and the .CPK files) or a .pkg:");
                 ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Browse...").x - ImGui::GetStyle().FramePadding.x * 4);
                 char buf[1024];
                 std::snprintf(buf, sizeof buf, "%s", dump_buf.c_str());
                 if (ImGui::InputText("##dump", buf, sizeof buf)) {
                     dump_buf = buf;
                     set.dump = trim(dump_buf);
-                    checks = validate_dump(set.dump);
+                    checks = validate_game(set);
                 }
                 page_entry();
                 ImGui::SameLine();
                 if (ImGui::Button("Browse...")) browse(0, set.dump, false);
+                // Or your own fake package: unpacked once on the first Play, into the folder below, then reused.
+                if (kMac && ImGui::Button("Use a PKG instead...")) {
+                    static const SDL_DialogFileFilter pkg_filter[] = {{"PS4 package", "pkg"}};
+                    SDL_ShowOpenFileDialog(on_folder, reinterpret_cast<void*>(intptr_t(2)), win, pkg_filter, 1, nullptr, false);
+                }
+                if (is_pkg(set.dump)) {
+                    ImGui::TextUnformatted("Unpack the game into (default: your OpenCrown data folder; pick another disk if you prefer):");
+                    ImGui::SetNextItemWidth(-ImGui::CalcTextSize("Browse...").x - ImGui::GetStyle().FramePadding.x * 4);
+                    char ibuf[1024];
+                    std::snprintf(ibuf, sizeof ibuf, "%s", set.install.c_str());
+                    if (ImGui::InputTextWithHint("##install", default_install_dir().c_str(), ibuf, sizeof ibuf)) {
+                        set.install = trim(ibuf);
+                        checks = validate_game(set);
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("Browse##install")) browse(3, install_dir(set), false);
+                }
                 if (!pick_msg.empty()) {
                     ImGui::PushStyleColor(ImGuiCol_Text, kWarn);
                     ImGui::TextWrapped("%s", pick_msg.c_str());

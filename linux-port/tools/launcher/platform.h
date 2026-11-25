@@ -7,6 +7,7 @@
 
 #include <initializer_list>
 #include <functional>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -84,7 +85,9 @@ inline std::vector<std::string> game_command(bool mac, const std::string& exe_di
         cmd.insert(cmd.end(), flags.begin(), flags.end());
         return cmd;
     }
-    cmd = {source_dir + "/play-mac.sh", dir_of(eboot)};
+    // A game package goes to play-mac.sh as it is (it unpacks it); an eboot stands for its folder.
+    const bool pkg = eboot.size() > 4 && (eboot.compare(eboot.size() - 4, 4, ".pkg") == 0 || eboot.compare(eboot.size() - 4, 4, ".PKG") == 0);
+    cmd = {source_dir + "/play-mac.sh", pkg ? eboot : dir_of(eboot)};
     cmd.insert(cmd.end(), flags.begin(), flags.end());
     return cmd;
 }
@@ -130,6 +133,7 @@ inline std::string play_phase(const std::vector<std::string>& lines) {
         const std::string& l = lines[i];
         if (l.rfind("+ ", 0) == 0 && has(l, "dcp_run ") && !has(l, "--build") && !has(l, "cmake")) return "";
         if (l.rfind("+ ", 0) == 0 && has(l, "--build") && has(l, "--target dcp_run")) return "Building the game for this Mac...";
+        if (l.rfind("play-mac: unpacking", 0) == 0) return "Unpacking your game package (first run only)...";
         if (l.rfind("play-mac: recompiling", 0) == 0) return "Recompiling your game (first run only, a few minutes)...";
         if (l.rfind("+ ", 0) == 0 && has(l, "--build") && has(l, "--target dcp_recompile")) return "Preparing the recompiler...";
     }
@@ -165,16 +169,35 @@ inline PlayProgress play_progress(const std::vector<std::string>& markers, const
     PlayProgress p;
     const std::string phase = play_phase(markers);
     if (phase.empty()) return p;
+    // A package is unpacked first (its own step, with a percentage); a dump folder has no such step.
+    int unpacked = -1;
+    bool unpack = false;
+    for (const std::string& l : markers) {
+        if (l.rfind("play-mac: unpacking", 0) != 0) continue;
+        unpack = true;
+        const size_t pc = l.rfind('%');
+        if (pc != std::string::npos && pc > 0 && l.back() == '%' && l.find("into") == std::string::npos) {
+            size_t b = pc;
+            while (b > 0 && l[b - 1] >= '0' && l[b - 1] <= '9') --b;
+            if (b < pc && pc - b <= 3) unpacked = std::atoi(l.substr(b, pc - b).c_str());
+        }
+    }
+    const int shift = unpack ? 1 : 0;
+    p.steps = 3 + shift;
     const char* name = nullptr;
-    if (phase.rfind("Preparing", 0) == 0) p.step = 1, name = "preparing the recompiler";
-    else if (phase.rfind("Recompiling", 0) == 0) p.step = 2, name = "recompiling your game (first run only)";
-    else p.step = 3, name = "building the game for this Mac";
+    if (phase.rfind("Unpacking", 0) == 0) p.step = 1, name = "unpacking your game package (first run only)";
+    else if (phase.rfind("Preparing", 0) == 0) p.step = 1 + shift, name = "preparing the recompiler";
+    else if (phase.rfind("Recompiling", 0) == 0) p.step = 2 + shift, name = "recompiling your game (first run only)";
+    else p.step = 3 + shift, name = "building the game for this Mac";
+    const int build_step = 3 + shift, recompile_step = 2 + shift;
     // The chunks of the game's own generated code are millions of lines each: the counter waits on them at the end.
     auto generated = [&](const char* prefix) { return ninja_line.find(std::string("/gen/") + prefix + "_") != std::string::npos; };
-    if (p.step == 3 && (generated("eboot") || generated("libc"))) name = "building your game's code, the slowest part";
-    p.text = "Step " + std::to_string(p.step) + " of 3: " + name;
+    if (p.step == build_step && (generated("eboot") || generated("libc"))) name = "building your game's code, the slowest part";
+    p.text = "Step " + std::to_string(p.step) + " of " + std::to_string(p.steps) + ": " + name;
     int d = 0, t = 0;
-    if (p.step != 2 && ninja_progress(ninja_line, &d, &t)) {  // the recompiler prints no progress
+    if (phase.rfind("Unpacking", 0) == 0) {
+        if (unpacked >= 0) p.fraction = float(unpacked) / 100.0f, p.text += " (" + std::to_string(unpacked) + "%)";
+    } else if (p.step != recompile_step && ninja_progress(ninja_line, &d, &t)) {  // the recompiler prints no progress
         p.fraction = float(d) / float(t);
         p.text += " (" + std::to_string(d) + "/" + std::to_string(t) + ")";
     }

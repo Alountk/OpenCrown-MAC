@@ -37,6 +37,8 @@ and renamed only when complete, so a cancelled run leaves no half install. Only 
 are refused. `dcp_pkg info <file.pkg>` lists what is inside. Unpacked, the game files match a hand-made dump (checked: the eboot, the
 modules and both CPK files are identical; a few `sce_sys` metadata files differ and nothing reads them).
 
+In the launcher, the Game page has "Use a PKG instead..."; with a package chosen, an "Unpack the game into" field appears (empty = the default folder) and the first Play shows the unpacking as its first step with a percentage. The app ships `dcp_pkg` next to the launcher; from a source tree `play-mac.sh` builds it once, which needs OpenSSL's static `libcrypto` (`brew install openssl`).
+
 `dcp_pkg` is GPL-2.0-or-later code (from shadPS4) and runs as its own process; see `linux-port/tools/dcp_pkg/README.md` and `NOTICE.md`.
 
 ## The launcher on macOS

@@ -33,7 +33,9 @@ case "$arg" in
     if [ ! -f "$install/eboot.bin" ] || [ ! -f "$install/sce_module/libc.prx" ]; then
       echo "play-mac: unpacking $arg into $install (once; about 6 GB)"
       if [ "$dry" != 1 ]; then
-        pkgtool=$work/tools/dcp_pkg
+        # In the app it ships next to the launcher; from a source tree it is built once (needs OpenSSL's static libcrypto, e.g. brew install openssl).
+        pkgtool=${DCP_PKG_TOOL:-$here/../../MacOS/dcp_pkg}
+        [ -x "$pkgtool" ] || pkgtool=$work/tools/dcp_pkg
         if [ ! -x "$pkgtool" ]; then
           command -v cmake >/dev/null 2>&1 || die "cmake not found (brew install cmake)"
           cmake -S "$here" -B "$work/tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON -DDCP_RENDER=OFF >/dev/null || die "could not configure the tools"
