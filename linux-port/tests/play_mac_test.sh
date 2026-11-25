@@ -28,6 +28,16 @@ check "nothing is written outside the work dir" '[ ! -e "$work/gen" ]'
 out=$("$script" "$game/eboot.bin" --frames 5 2>&1)
 check "eboot.bin path accepted, arguments passed on" 'echo "$out" | tail -1 | grep -q "dcp_run $game/eboot.bin --window .*--frames 5"'
 
+# A .pkg: unpacked once into DCP_GAME_DIR (a missing package is refused; with the install already there nothing is unpacked).
+out=$("$script" "$tmp/none.pkg" 2>&1); rc=$?
+check "missing package is refused" '[ $rc -ne 0 ] && echo "$out" | grep -q "no package"'
+echo fake > "$tmp/g.pkg"
+out=$(DCP_GAME_DIR="$tmp/install" "$script" "$tmp/g.pkg" 2>&1)
+check "package not yet unpacked says where it goes" 'echo "$out" | grep -q "unpacking .*g.pkg into $tmp/install"'
+cp -R "$game" "$tmp/install"
+out=$(DCP_GAME_DIR="$tmp/install" "$script" "$tmp/g.pkg" 2>&1)
+check "an existing install is reused, not unpacked again" '! echo "$out" | grep -q "unpacking" && echo "$out" | tail -1 | grep -q "dcp_run $tmp/install/eboot.bin"'
+
 # Build only (used by the online test script): everything is prepared, the game is not started.
 out=$(DCP_PLAY_BUILD_ONLY=1 "$script" "$game" 2>&1)
 check "build-only prepares dcp_run" 'echo "$out" | grep -q "^+ cmake --build .* --target dcp_run"'

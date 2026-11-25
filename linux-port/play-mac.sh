@@ -1,6 +1,8 @@
 #!/bin/sh
 # One command for Apple Silicon: recompile your own decrypted dump, build dcp_run natively (arm64, no JIT) and play.
-#   ./play-mac.sh <folder holding eboot.bin | path to eboot.bin> [dcp_run options...]
+#   ./play-mac.sh <folder holding eboot.bin | path to eboot.bin | game.pkg> [dcp_run options...]
+# A .pkg (your own fake PKG) is unpacked once, by dcp_pkg, into $DCP_GAME_DIR (default
+# ~/Library/Application Support/OpenCrown/game; set it to keep the 6 GB on another disk) and reused after that.
 # The folder must hold eboot.bin and sce_module/libc.prx (your own dump). Needs cmake and the Xcode command line tools
 # (ninja is used when installed). Everything generated lives in $DCP_WORK_DIR (default
 # ~/Library/Application Support/OpenCrown/build), never in this repository: it is derived from your game files, do not share
@@ -16,20 +18,49 @@ if [ "${DCP_PLAY_PRINT_PATH:-0}" = 1 ]; then echo "$PATH"; exit 0; fi
 
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "play-mac: $*" >&2; exit 1; }
-usage() { echo "usage: $0 <folder holding eboot.bin | eboot.bin> [dcp_run options...]" >&2; }
+usage() { echo "usage: $0 <folder holding eboot.bin | eboot.bin | game.pkg> [dcp_run options...]" >&2; }
 
 [ $# -ge 1 ] || { usage; exit 2; }
 arg=$1
 shift
-case "$arg" in *.bin) eboot=$arg ;; *) eboot=$arg/eboot.bin ;; esac
+dry=${DCP_PLAY_DRY:-0}
+work=${DCP_WORK_DIR:-$HOME/Library/Application Support/OpenCrown/build}
+
+case "$arg" in
+  *.pkg|*.PKG)
+    [ -f "$arg" ] || die "no package at $arg"
+    install=${DCP_GAME_DIR:-$HOME/Library/Application Support/OpenCrown/game}
+    if [ ! -f "$install/eboot.bin" ] || [ ! -f "$install/sce_module/libc.prx" ]; then
+      echo "play-mac: unpacking $arg into $install (once; about 6 GB)"
+      if [ "$dry" != 1 ]; then
+        # In the app it ships next to the launcher; from a source tree it is built once (needs OpenSSL's static libcrypto, e.g. brew install openssl).
+        pkgtool=${DCP_PKG_TOOL:-$here/../../MacOS/dcp_pkg}
+        [ -x "$pkgtool" ] || pkgtool=$work/tools/dcp_pkg
+        if [ ! -x "$pkgtool" ]; then
+          command -v cmake >/dev/null 2>&1 || die "cmake not found (brew install cmake)"
+          cmake -S "$here" -B "$work/tools" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON -DDCP_RENDER=OFF >/dev/null || die "could not configure the tools"
+          cmake --build "$work/tools" --target dcp_pkg || die "could not build dcp_pkg"
+        fi
+        mkdir -p "$(dirname "$install")" || die "cannot create $(dirname "$install")"
+        # Unpack next to the destination (same disk) and rename at the end: a cancelled run leaves no half install.
+        stage=$install.partial
+        rm -rf "$stage"
+        "$pkgtool" extract "$arg" "$stage" | sed -n 's/^progress \([0-9]*\) \([0-9]*\)$/\1 \2/p' | awk '{ p = int($1 * 100 / $2); if (p != l) { printf "play-mac: unpacking %d%%\n", p; l = p } }'
+        [ -f "$stage/eboot.bin" ] && [ -f "$stage/sce_module/libc.prx" ] || { rm -rf "$stage"; die "the package did not unpack (is it a fake PKG? see dcp_pkg info)"; }
+        rm -rf "$install"
+        mv "$stage" "$install"
+      fi
+    fi
+    eboot=$install/eboot.bin ;;
+  *.bin) eboot=$arg ;;
+  *) eboot=$arg/eboot.bin ;;
+esac
+case "$arg" in *.pkg|*.PKG) [ "$dry" = 1 ] && [ ! -f "$eboot" ] && { echo "+ (dry run: $eboot would exist after unpacking)"; exit 0; } ;; esac
 [ -f "$eboot" ] || die "no eboot.bin at $eboot"
 gamedir=$(cd "$(dirname "$eboot")" && pwd)
 eboot=$gamedir/$(basename "$eboot")
 libc=$gamedir/sce_module/libc.prx
 [ -f "$libc" ] || die "libc.prx not found at $libc (it comes with your dump, in sce_module/)"
-
-dry=${DCP_PLAY_DRY:-0}
-work=${DCP_WORK_DIR:-$HOME/Library/Application Support/OpenCrown/build}
 
 # Generated sources must stay out of any git work tree.
 p=$work

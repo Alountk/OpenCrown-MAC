@@ -29,11 +29,13 @@ label="$version-mac.$revision"
 app="$out/OpenCrown.app"
 
 run cmake -S "$here" -B "$build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DDCP_RECOMPILED=ON
-run cmake --build "$build" --target opencrown_launcher -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+run cmake --build "$build" --target opencrown_launcher dcp_pkg -j"$(sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 run rm -rf "$app"
 run mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/linux-port"
 run cp "$build/opencrown-launcher" "$app/Contents/MacOS/opencrown-launcher"
+# The package unpacker (GPL, its own program, libcrypto linked statically): play-mac.sh runs it when the player gives a .pkg.
+run cp "$build/dcp_pkg" "$app/Contents/MacOS/dcp_pkg"
 # The source tree, without build folders, the output folder or git data.
 echo "+ tar -C $here --exclude=build* --exclude=dist --exclude=.git -cf - . | tar -C $app/Contents/Resources/linux-port -xf -"
 if [ "$dry" != 1 ]; then

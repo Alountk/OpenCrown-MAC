@@ -72,6 +72,16 @@ foreach(tool dcp_cpk dcp_tex dcp_audio dcp_sprite)
   target_link_libraries(${tool} PRIVATE dcp_formats)
 endforeach()
 
+# dcp_pkg: unpacks the player's own fake PKG (macOS only for now). GPL-2.0-or-later code, kept in its own program and never
+# linked into another target (tools/dcp_pkg/README.md). libcrypto is linked statically so the app needs no OpenSSL installed.
+if(APPLE)
+  set(OPENSSL_USE_STATIC_LIBS ON)
+  find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+  find_package(ZLIB REQUIRED)
+  add_executable(dcp_pkg tools/dcp_pkg/main.cpp tools/dcp_pkg/pkg_extract.cpp tools/dcp_pkg/crypto_openssl.cpp)
+  target_link_libraries(dcp_pkg PRIVATE OpenSSL::Crypto ZLIB::ZLIB)
+endif()
+
 # Loader: maps the user's eboot into this process, relocates, binds imports to shims / module exports / stubs.
 add_library(dcp_loader STATIC src/loader/nid.cpp src/loader/elf.cpp src/loader/hle.cpp)
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|i.86" OR CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")

@@ -97,6 +97,7 @@ int main() {
     CHECK((dcp::launcher::game_command(true, "/app", "/src", "/d/CUSA/eboot.bin", flags) ==
            V{"/src/play-mac.sh", "/d/CUSA", "--render", "--window", "--renderer", "auto", "--size", "1280x720"}));
     CHECK((dcp::launcher::game_command(true, "/app", "/src", "eboot.bin", {"--4k"}) == V{"/src/play-mac.sh", ".", "--4k"}));
+    CHECK((dcp::launcher::game_command(true, "/app", "/src", "/d/Game.pkg", {"--4k"}) == V{"/src/play-mac.sh", "/d/Game.pkg", "--4k"}));
 
     // What the status line says while the script runs, from the end of the log (the latest phase marker wins).
     using dcp::launcher::play_phase;
@@ -121,6 +122,18 @@ int main() {
         const std::vector<std::string> prep = {"+ cmake --build /w/tools --target dcp_recompile -j10"};
         const std::vector<std::string> recomp = {"+ cmake --build /w/tools --target dcp_recompile -j10", "play-mac: recompiling your dump (about 2 minutes)"};
         const std::vector<std::string> build = {"play-mac: generated code is up to date", "+ cmake --build /w/run --target dcp_run -j10"};
+        // A package adds a first step with its own percentage; the others move down by one.
+        const std::vector<std::string> unpack = {"play-mac: unpacking /p/g.pkg into /d/game (once; about 6 GB)", "play-mac: unpacking 0%", "play-mac: unpacking 42%"};
+        auto u = play_progress(unpack, "");
+        CHECK(u.step == 1 && u.steps == 4 && u.fraction > 0.419f && u.fraction < 0.421f && u.text.find("42%") != std::string::npos);
+        CHECK(play_phase(unpack) == "Unpacking your game package (first run only)...");
+        auto up = unpack;
+        up.push_back("+ cmake --build /w/tools --target dcp_recompile -j10");
+        auto after = play_progress(up, "[3/30] Building CXX object x");
+        CHECK(after.step == 2 && after.steps == 4);
+        up.push_back("play-mac: recompiling your dump (about 2 minutes)");
+        CHECK(play_progress(up, "").step == 3);
+        CHECK(play_progress(prep, "").steps == 3);  // no package: three steps as before
         auto p = play_progress(prep, "[3/30] Building CXX object x");
         CHECK(p.step == 1 && p.steps == 3 && p.fraction > 0.099f && p.fraction < 0.101f);
         CHECK(p.text == "Step 1 of 3: preparing the recompiler (3/30)");
